@@ -306,7 +306,7 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 	// 前端渲染成「无子目录」。用户看到的是一个**看起来正常、实则读不到任何东西**
 	// 的挂载点，唯一的线索（权限）被丢掉了（安卓 2026-10 反馈：弹出来一个空挂载）。
 	if readErr != nil {
-		resp["read_error"] = describeTreeReadError(target, readErr)
+		resp["read_error"] = describeTreeReadError(target, readErr, platform.IsTermux())
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -316,8 +316,13 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 // 分两类：
 //   - 安卓 Termux 上读手机存储失败 → 分区存储未授权，唯一出路是 termux-setup-storage；
 //   - 其他 → 原样带上 errno，但换成中文可读的说法。
-func describeTreeReadError(dir string, err error) string {
-	if platform.IsTermux() && isStoragePath(dir) {
+//
+// isAndroid 是**显式传入**的平台判定，不在函数内部调 platform.IsTermux()：
+// 那样的话这段逻辑只能在真机上测 —— 而 CI 跑在 Linux/Windows 上，
+// 断言安卓文案永远走不到那个分支，测试会假绿或假红。
+// 调用方用 platform.IsTermux() 的结果传进来，行为不变，但函数本身可测。
+func describeTreeReadError(dir string, err error, isAndroid bool) string {
+	if isAndroid && isStoragePath(dir) {
 		return "无法读取手机存储：" + err.Error() +
 			"。这是安卓分区存储未授权，请在 Termux 执行 termux-setup-storage 后重试"
 	}

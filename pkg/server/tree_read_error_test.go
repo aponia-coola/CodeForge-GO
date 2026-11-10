@@ -73,6 +73,9 @@ func TestListTreeUnreadableChildDoesNotFailParent(t *testing.T) {
 }
 
 // 安卓 Termux 上读手机存储失败时，文案必须指向可执行的下一步
+//
+// isAndroid 显式传 true：这段文案只在安卓平台出现，靠运行时探测的话
+// CI（非安卓）永远走不到该分支，断言会恒假。平台判定是调用方的事。
 // （termux-setup-storage），而不是把 errno 原样抛给用户。
 func TestDescribeTreeReadErrorHintsTermuxStorage(t *testing.T) {
 	perm := os.ErrPermission
@@ -88,7 +91,7 @@ func TestDescribeTreeReadErrorHintsTermuxStorage(t *testing.T) {
 	for _, c := range cases {
 		msg := describeTreeReadError(c.dir, &os.PathError{
 			Op: "readdirent", Path: c.dir, Err: perm,
-		})
+		}, true)
 		if msg == "" {
 			t.Errorf("%s：describeTreeReadError 不应对失败返回空串", c.name)
 			continue
@@ -99,12 +102,28 @@ func TestDescribeTreeReadErrorHintsTermuxStorage(t *testing.T) {
 	}
 }
 
+// 安卓平台上读**非**手机存储路径时，不该硬塞 termux-setup-storage。
+//
+// 这条与上面那条配对：平台判定与路径判定是两个独立条件，
+// 只测其中一半会漏掉「安卓 + 非存储路径」这个交叉组合。
+func TestDescribeTreeReadErrorAndroidNonStoragePath(t *testing.T) {
+	msg := describeTreeReadError("/var/lib/secret", &os.PathError{
+		Op: "readdirent", Path: "/var/lib/secret", Err: os.ErrPermission,
+	}, true)
+	if strings.Contains(msg, "termux-setup-storage") {
+		t.Errorf("安卓上的非存储路径不该提示 termux-setup-storage: %s", msg)
+	}
+	if !strings.Contains(msg, "无权限") {
+		t.Errorf("权限失败应说明是无权限，实际: %s", msg)
+	}
+}
+
 // 非手机存储路径不该被硬塞 termux-setup-storage（那是安卓专用命令，
 // 在 Linux/Windows 上毫无意义），但仍要说清是权限问题。
 func TestDescribeTreeReadErrorNonStoragePath(t *testing.T) {
 	msg := describeTreeReadError("/var/lib/secret", &os.PathError{
 		Op: "readdirent", Path: "/var/lib/secret", Err: os.ErrPermission,
-	})
+	}, false)
 	if strings.Contains(msg, "termux-setup-storage") {
 		t.Errorf("非手机存储路径不该提示 termux-setup-storage: %s", msg)
 	}
@@ -112,7 +131,7 @@ func TestDescribeTreeReadErrorNonStoragePath(t *testing.T) {
 		t.Errorf("权限失败应说明是无权限，实际: %s", msg)
 	}
 	// 未知错误也要有文案，不能退化成空串（前端会渲染成空白条）。
-	if other := describeTreeReadError("/tmp/x", errors.New("boom")); other == "" {
+	if other := describeTreeReadError("/tmp/x", errors.New("boom"), false); other == "" {
 		t.Error("未知错误也应有可读文案")
 	}
 }
