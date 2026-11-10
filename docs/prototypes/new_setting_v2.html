@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CodeForge · 设置重构（分组分类 + 供应商机制）</title>
+<!--
+  重构说明
+  ─────────────────────────────────────────────────────────────
+  1. 分类（信息架构）：沿用 new_setting.html 的三分组，把当前 9 个设置页归位
+       个人：常规 / 模型 / 外观
+       扩展：记忆 / 技能 / 插件 / 子智能体 / MCP 服务
+       数据：归档
+     页面内容与控件与原界面一一对应，不增不减（只重排、不改语义）。
+
+  2. 模型页新增「供应商（Provider）机制」——本次重构的核心
+     现状（config/models.yaml）：base_url / key_value 被复制到每条模型条目上，
+       同一网关下加第 N 个模型 = 把地址和密钥再抄一遍。
+     重构后：
+       供应商 = { 名称, Base URL, API 格式, API Key, 启用 }        ← 只维护一份
+       模型   = { 归属供应商, 模型 id, 显示名, 上下文, 启用 }        ← 只填 id
+     由此得到三个能力：
+       · 同供应商切换模型：点「设为当前」即可换 id，不动 Key / URL
+       · 新增模型：选已有供应商 → 地址与密钥自动继承，只填 id
+       · 批量添加：从上游 /models 勾选多个 id，一次写入同一供应商
+  ─────────────────────────────────────────────────────────────
+-->
+<style>
+:root{
+  --bg:#fff;--side:#fafbfc;--elev:#f1f3f6;--line:#e6e8ee;--line2:#eef0f4;
+  --text:#171a21;--dim:#6b7280;--dim2:#98a0ad;--accent:#4373f5;--accent2:#eef2fe;
+  --ok:#16a34a;--ok2:#e8f7ee;--danger:#dc2626;--warn:#b45309;--warn2:#fdf6ec;
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Consolas,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+h1,h2,h3{margin:0;font-weight:600}
+code,.mono{font-family:var(--mono)}
+.dim{color:var(--dim)}
+
+/* 顶栏 */
+.topbar{height:50px;flex:none;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--line);background:#fff}
+.tb-t{font-size:14px;font-weight:600}
+.tb-sub{font-size:12px;color:var(--dim2)}
+.tb-cur{margin-left:auto;font-size:12px;color:var(--dim);display:flex;align-items:center;gap:7px;background:var(--elev);padding:5px 11px;border-radius:999px}
+.tb-cur b{color:var(--text);font-weight:600}
+.tb-cur .dot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+
+/* 主体 */
+.app{flex:1;display:flex;min-height:0}
+.nav{width:236px;flex:none;background:var(--side);border-right:1px solid var(--line);padding:12px 10px;overflow-y:auto}
+.nav-back{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:8px 10px;border:none;background:transparent;border-radius:9px;font:inherit;font-size:13.5px;color:var(--text);cursor:pointer;margin-bottom:6px}
+.nav-back:hover{background:var(--elev)}
+.ng{font-size:11.5px;color:var(--dim2);padding:14px 10px 5px;letter-spacing:.4px}
+.ni{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 10px;border:none;background:transparent;border-radius:9px;font:inherit;font-size:13.5px;color:var(--text);cursor:pointer}
+.ni:hover{background:var(--elev)}
+.ni.on{background:#e7eaef;font-weight:600}
+.ni svg{color:var(--dim);flex:none}
+.ni.on svg{color:var(--text)}
+.main{flex:1;overflow-y:auto;padding:32px 44px 90px;min-width:0}
+.w{max-width:940px;margin:0 auto}
+
+/* 通用块 */
+.head h1{font-size:22px;letter-spacing:-.2px}
+.head p{margin:6px 0 0;color:var(--dim);font-size:13px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.grp{font-size:13px;font-weight:600;color:var(--dim);margin:26px 0 8px}
+.grp:first-child{margin-top:18px}
+.rows{display:flex;flex-direction:column}
+.rw{display:flex;align-items:center;gap:18px;padding:13px 16px;border-top:1px solid var(--line2)}
+.rows>.rw:first-child{border-top:none}
+.m{flex:1;min-width:0}
+.t{font-size:13.5px;font-weight:500}
+.d{font-size:12.5px;color:var(--dim);margin-top:2px}
+.ctl{flex:none;display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.ctl.grow{flex:1;max-width:420px}
+.tag{font-size:11px;padding:1px 6px;border-radius:6px;background:var(--elev);color:var(--dim);margin-left:6px;vertical-align:1px;white-space:nowrap}
+.tag.ok{background:var(--ok2);color:var(--ok)}
+.tag.bl{background:var(--accent2);color:var(--accent)}
+.tag.wr{background:var(--warn2);color:var(--warn)}
+.val{font-size:12.5px;color:var(--dim);max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}
+.note{font-size:12.5px;color:var(--dim2)}
+
+/* 开关 */
+.sw{position:relative;display:inline-block;width:42px;height:24px;flex:none;cursor:pointer}
+.sw input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.sw i{position:absolute;inset:0;border-radius:999px;background:#dfe3ea;transition:background .18s}
+.sw i::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(20,25,40,.22);transition:transform .18s}
+.sw input:checked+i{background:var(--accent)}
+.sw input:checked+i::after{transform:translateX(18px)}
+
+/* 滑条 */
+.sld{display:flex;align-items:center;gap:10px;min-width:240px}
+.sld input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:999px;background:#e6e9ef;outline:none;margin:0;cursor:pointer}
+.sld input::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:1.5px solid var(--accent);box-shadow:0 1px 3px rgba(20,25,40,.2)}
+.sld input::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:#fff;border:1.5px solid var(--accent)}
+.sld .v{font-size:12.5px;color:var(--dim);min-width:52px;text-align:right}
+
+/* 分段 / 按钮 */
+.seg{display:inline-flex;background:var(--elev);border-radius:10px;padding:2px;gap:2px}
+.seg button{border:none;background:transparent;height:28px;padding:0 13px;border-radius:8px;font:inherit;font-size:12.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
+.seg button.on{background:#fff;color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(20,25,40,.1)}
+.btn{height:34px;padding:0 14px;border:1px solid var(--line);background:#fff;color:var(--text);border-radius:9px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#f7f8fa}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#3563e0}
+.btn.sm{height:28px;padding:0 10px;font-size:12px;border-radius:8px}
+.btn.dg{color:var(--danger)}
+.btn.dg:hover{background:#fdf1f1;border-color:#f5c9c9}
+.bs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px}
+.rsp{font-size:12px;color:var(--ok)}
+.sp{flex:1}
+
+/* 输入 */
+.inp{width:100%;height:36px;border:1px solid var(--line);border-radius:9px;padding:0 11px;font:inherit;font-size:13px;background:#fff;color:var(--text)}
+.inp::placeholder{color:var(--dim2)}
+.inp:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent2)}
+.inp.n{width:96px}
+.inp[readonly]{background:#f7f8fa;color:var(--dim);cursor:default}
+.mini{display:flex;align-items:center;gap:8px;flex:none}
+.mini .lb{font-size:12.5px;color:var(--dim);white-space:nowrap}
+select.inp{appearance:none;-webkit-appearance:none;padding-right:30px;cursor:pointer}
+.sel{position:relative;display:block}
+.sel svg{position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--dim);pointer-events:none}
+.form{padding:16px;display:flex;flex-direction:column;gap:13px}
+.f{display:flex;flex-direction:column;gap:6px}
+.f>.lb{font-size:12.5px;color:var(--dim)}
+.irow{display:flex;gap:8px;align-items:center}
+.irow .inp{flex:1}
+.np{display:flex;gap:14px;flex-wrap:wrap}
+.np label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim)}
+.np .inp{width:120px}
+.foot{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--line2);background:#fcfcfd}
+.foot .rsp{margin-right:auto}
+
+/* 列表 */
+.list{display:flex;flex-direction:column}
+.li{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--line2);font-size:13px}
+.li:first-child{border-top:none}
+.lm{flex:1;min-width:0}
+.ln{font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.ln .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.ln .dot.o{background:#d3d8e0}
+.ls{font-size:12px;color:var(--dim);margin-top:2px;word-break:break-all}
+.ltext{flex:1;word-break:break-all}
+.lmeta{font-size:11.5px;color:var(--dim2);flex:none}
+.empty{padding:18px 16px;font-size:12.5px;color:var(--dim2);border-top:1px solid var(--line2)}
+.add{display:flex;gap:8px;padding:14px 16px;border-top:1px solid var(--line2)}
+.add .inp{flex:1}
+
+/* 标签页 */
+.tabs{display:flex;gap:2px;margin:18px 0 14px;background:var(--elev);border-radius:10px;padding:3px;width:max-content}
+.tabs button{border:none;background:transparent;height:30px;padding:0 14px;border-radius:8px;font:inherit;font-size:12.5px;color:var(--dim);cursor:pointer}
+.tabs button.on{background:#fff;color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(20,25,40,.1)}
+
+/* ===== 供应商：主从双栏 ===== */
+.md{display:grid;grid-template-columns:230px minmax(0,1fr);border:1px solid var(--line);border-radius:14px;overflow:hidden;min-height:460px;background:#fff}
+.mdl{background:var(--side);border-right:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:2px}
+.mdi{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:9px 10px;border:none;background:transparent;border-radius:9px;font:inherit;font-size:13px;color:var(--text);cursor:pointer}
+.mdi:hover{background:var(--elev)}
+.mdi.on{background:#e7eaef;font-weight:600}
+.mdi .dd{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
+.mdi .dd.o{background:#d3d8e0}
+.mdi .cnt{margin-left:auto;font-size:11px;color:var(--dim2);font-weight:400}
+.mdi.addprov{color:var(--accent);font-weight:600}
+.mdd{padding:18px 20px 22px;min-width:0}
+.mdt{font-size:13px;font-weight:600;color:var(--dim);margin-bottom:10px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.mdt .sub{font-weight:400;font-size:12px;color:var(--dim2)}
+
+/* 供应商机制说明条 */
+.banner{display:flex;gap:10px;align-items:flex-start;background:var(--accent2);border:1px solid #dbe4fd;border-radius:12px;padding:11px 14px;margin-bottom:14px;font-size:12.5px;color:#2c4a9e;line-height:1.6}
+.banner b{color:#1e3a8a}
+.banner svg{flex:none;margin-top:2px;color:var(--accent)}
+
+/* 继承块（添加模型时复用供应商配置） */
+.inherit{border:1px dashed #cdd8f7;background:#f7f9ff;border-radius:11px;padding:11px 13px}
+.inherit .ih{font-size:12.5px;color:#2c4a9e;margin-bottom:8px}
+.inherit .ih b{color:#1e3a8a}
+.inherit .ir{display:flex;gap:10px;font-size:12.5px;padding:4px 0;align-items:center}
+.inherit .ir>span{width:78px;color:var(--dim);flex:none}
+.inherit .ir code{font-size:12px;color:var(--text);word-break:break-all}
+
+/* 供应商分组头（模型列表页） */
+.pg{display:flex;align-items:center;gap:9px;padding:10px 16px;background:#fcfcfd;border-top:1px solid var(--line2);font-size:12.5px;flex-wrap:wrap}
+.pg:first-child{border-top:none}
+.pg svg{color:var(--dim);flex:none}
+.pg b{font-size:13px}
+.pg code{font-size:11.5px;color:var(--dim2)}
+
+/* 上游发现面板 */
+.pnl{margin:12px 0 0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.pnl-h{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fcfcfd;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+.pnl-t{font-size:13px;font-weight:600;flex:none}
+.pnl-s{display:flex;gap:8px;flex:1;justify-content:flex-end}
+.pnl-s .inp{max-width:180px;height:30px;font-size:12.5px}
+.pnl-l{max-height:200px;overflow:auto}
+.pi{display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;border-top:1px solid var(--line2);cursor:pointer}
+.pi:first-child{border-top:none}
+.pi:hover{background:#fafbfc}
+.pi input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px;flex:none}
+.pi .id{flex:1;font-family:var(--mono);font-size:12.5px}
+.pi .own{font-size:11px;color:var(--dim2)}
+.pnl-f{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:10px 12px;border-top:1px solid var(--line2);background:#fcfcfd}
+.pnl-f .rsp{margin-right:auto}
+
+/* 密钥行 */
+.keyseg{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.keyseg .seg{flex:none}
+.keyseg .inp{flex:1;min-width:200px}
+.eye{width:34px;height:34px;flex:none;border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer;font-size:14px;line-height:1}
+
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);background:#171a21;color:#fff;font-size:12.5px;padding:8px 14px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;z-index:99}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="tb-t">设置</span>
+  <span class="tb-sub">个人 / 扩展 / 数据 三分类 · 模型页启用供应商机制</span>
+  <span class="tb-cur"><span class="dot"></span>当前模型 <b id="cur-model-label">—</b></span>
+</div>
+
+<div class="app">
+  <aside class="nav" id="nav"></aside>
+  <main class="main" id="main"></main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+
+/* ============================ 图标 ============================ */
+var IC={
+  gear:'<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/>',
+  cube:'<path d="M12 2.6 20.5 7v10L12 21.4 3.5 17V7z"/><path d="M3.5 7 12 11.6 20.5 7M12 11.6v9.8"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  brain:'<path d="M12 3a3 3 0 0 0-3 3v1a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6"/><path d="M12 3v4"/>',
+  bolt:'<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
+  puzzle:'<path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.2"/>',
+  nodes:'<circle cx="12" cy="4.5" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M12 6.7v5.1M12 11.8 6.4 17.2M12 11.8l5.6 5.4"/>',
+  hub:'<circle cx="5" cy="12" r="2.4"/><circle cx="19" cy="12" r="2.4"/><circle cx="12" cy="5" r="2.4"/><circle cx="12" cy="19" r="2.4"/><path d="M7.2 10.8 10.4 6.7M16.8 10.8 13.6 6.7M7.2 13.2l3.2 4.1M16.8 13.2l-3.2 4.1"/>',
+  box:'<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>',
+  back:'<path d="M19 12H5M12 19l-7-7 7-7"/>',
+  chev:'<path d="m6 9 6 6 6-6"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  key:'<path d="M15.5 8.5a3.5 3.5 0 1 1-4.6-3.3L21 3v3h-2v2h-2v2h-2.2"/><circle cx="7" cy="17" r="3"/>'
+};
+function ic(n,s){s=s||15;return '<svg viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+IC[n]+'</svg>';}
+
+/* ============================ 数据源 ============================ */
+/* 页面分类：沿用 new_setting.html 的三分组 */
+var PAGES=[
+  {id:'general',   label:'常规',      icon:'gear',   group:'个人', desc:'工作区、模型、通知与执行策略'},
+  {id:'models',    label:'模型',      icon:'cube',   group:'个人', desc:'按供应商管理模型，同供应商下切换 id 无需重填地址与密钥'},
+  {id:'appearance',label:'外观',      icon:'sun',    group:'个人', desc:'对话框尺寸、思考特效与背景'},
+  {id:'memory',    label:'记忆',      icon:'brain',  group:'扩展', desc:'当前项目的长期记忆'},
+  {id:'skills',    label:'技能',      icon:'bolt',   group:'扩展', desc:'项目技能目录与触发词'},
+  {id:'builtin',   label:'插件',      icon:'puzzle', group:'扩展', desc:'进程内增强能力'},
+  {id:'subagents', label:'子智能体',  icon:'nodes',  group:'扩展', desc:'多智能体协作的开关与能力边界'},
+  {id:'mcp',       label:'MCP 服务',  icon:'hub',    group:'扩展', desc:'本地与远程 MCP 服务的注册与管理'},
+  {id:'archived',  label:'归档',      icon:'box',    group:'数据', desc:'已归档的会话，满 10 天自动删除'}
+];
+
+/* 供应商库（真实数据取自 config/models.yaml，已按 base_url+key 归并） */
+var PROVIDERS=[
+  {id:'p-deepseek', name:'DeepSeek', on:true,
+   base:'https://api.deepseek.com', fmt:'Chat Completions (/chat/completions)', proto:'openai',
+   keySource:'plain', keyMask:'sk-4589••••••••••••••••••••••••db98', keyEnv:'',
+   models:[{id:'deepseek-flash', name:'DeepSeekV4.1Flash', ctxIn:1040000, ctxOut:384000, on:true}],
+   discover:['deepseek-chat','deepseek-reasoner','deepseek-v3.2-exp']},
+
+  {id:'p-glm', name:'智谱 GLM', on:true,
+   base:'https://open.bigmodel.cn/api/paas/v4', fmt:'Chat Completions (/chat/completions)', proto:'openai',
+   keySource:'plain', keyMask:'c5c3d16f••••••••••••••••••••••', keyEnv:'',
+   models:[{id:'glm-4.7-flash', name:'GLM4.7 Flash', ctxIn:200000, ctxOut:128000, on:true}],
+   discover:['glm-4.7','glm-4.6-flash','glm-4.5-air']},
+
+  {id:'p-silicon', name:'SiliconFlow', on:true,
+   base:'https://api.siliconflow.cn/v1', fmt:'Chat Completions (/chat/completions)', proto:'openai',
+   keySource:'plain', keyMask:'sk-vums••••••••••••••••••••••••••wwt', keyEnv:'',
+   models:[{id:'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B', name:'DeepSeek-R1-0528-Qwen3-8B', ctxIn:128000, ctxOut:128000, on:true}],
+   discover:['Qwen/Qwen3-235B-A22B','moonshotai/Kimi-K2-Instruct','deepseek-ai/DeepSeek-V3.2']},
+
+  /* ← 这就是原 models.yaml 里 base_url 与 key_value 完全重复的那两条，现在合并成一个供应商 */
+  {id:'p-intern', name:'上海模型实验室', on:true,
+   base:'https://discovery-api.intern-ai.org.cn/v1', fmt:'Chat Completions (/chat/completions)', proto:'openai',
+   keySource:'plain', keyMask:'sk-66be••••••••••••••••••••••••••••bee', keyEnv:'',
+   models:[
+     {id:'Atria-Dawn-Preview',    name:'AD',            ctxIn:256000, ctxOut:128000, on:true},
+     {id:'deepseek-v4-flash-0731',name:'DeepSeekV4Flash',ctxIn:262144, ctxOut:131072, on:true}
+   ],
+   discover:['deepseek-v4-flash-0731','deepseek-v4-pro-0815','internlm3-8b-instruct','Atria-Dawn-Preview']},
+
+  {id:'p-openai', name:'OpenAI', on:false,
+   base:'https://api.openai.com/v1', fmt:'Chat Completions (/chat/completions)', proto:'openai',
+   keySource:'env', keyMask:'', keyEnv:'OPENAI_API_KEY',
+   models:[{id:'gpt-4o', name:'GPT-4o', ctxIn:128000, ctxOut:16384, on:true}],
+   discover:['gpt-4o-mini','gpt-4.1','o4-mini']}
+];
+
+/* 生效模型：供应商 + 模型 id 两个字段即可定位 */
+var STATE={
+  page:'general',
+  tab:'list',              // 模型页 tab: list | sup | add
+  prov:'p-intern',         // 供应商管理页选中的供应商
+  amProv:'p-intern',       // 添加模型页选中的归属供应商（'__new__' 表示新建）
+  cur:{p:'p-intern', m:'deepseek-v4-flash-0731'}
+};
+
+/* 其余页面数据 */
+var MEM=[{text:'回复风格保持简洁',meta:'09-18'},{text:'项目使用 Go 1.27 + 原生 net/http',meta:'09-17'}];
+var SKILLS=[{name:'TRAE-code-review',sub:'对 MR / commit / 分支执行通用代码审查',tag:'代码审查'},{name:'TRAE-debugger',sub:'通过运行时证据定位复杂 Bug',tag:'运行时调试'}];
+var PLUGINS=[{name:'计划模式',sub:'@plan 触发只读规划，输出结构化方案',on:true},{name:'任务清单',sub:'多步任务自动维护待办列表',on:true}];
+var MCP=[{name:'parallel_search',sub:'远程 · Streamable HTTP',on:true},{name:'exa',sub:'远程 · Streamable HTTP',on:false}];
+var ARCHIVED=[{name:'重构设置界面',sub:'归档 2 天 · 12 条消息'},{name:'修复 Web 工具 SSRF',sub:'归档 8 天 · 34 条消息'}];
+
+/* ============================ 工具函数 ============================ */
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmt(n){n=+n||0;if(n>=1000000)return (n/1000000).toFixed(2).replace(/\.?0+$/,'')+'M';if(n>=1000)return Math.round(n/1000)+'K';return String(n);}
+function findProv(id){for(var i=0;i<PROVIDERS.length;i++){if(PROVIDERS[i].id===id)return PROVIDERS[i];}return null;}
+function curModel(){
+  var p=findProv(STATE.cur.p); if(!p)return null;
+  for(var i=0;i<p.models.length;i++){if(p.models[i].id===STATE.cur.m)return {p:p,m:p.models[i]};}
+  return null;
+}
+function isCur(pid,mid){return STATE.cur.p===pid&&STATE.cur.m===mid;}
+function keyLabel(p){
+  if(p.keySource==='env')return p.keyEnv?'环境变量 '+p.keyEnv:'未设置环境变量';
+  return p.keyMask||'未设置密钥';
+}
+function sw(on,act,key){
+  return '<label class="sw"><input type="checkbox"'+(on?' checked':'')+
+    (act?' data-act="'+act+'" data-key="'+esc(key||'')+'"':' data-act="demo" data-msg="已切换（示例）"')+
+    '><i></i></label>';
+}
+
+/* ============================ 页面：常规 ============================ */
+function pageGeneral(){
+  var c=curModel();
+  var modelVal=c?(c.m.name||c.m.id):'未配置';
+  var h=head('常规','工作区、模型、通知与执行策略');
+  h+='<div class="grp">项目信息</div><div class="card"><div class="rows">'+
+      row('static',{title:'项目',desc:'Agent 读写文件的根目录',value:'C:\\Users\\26536\\Desktop\\Code\\CodeForge-GO'})+
+      '<div class="rw"><div class="m"><div class="t">模型<span class="tag bl">供应商托管</span></div>'+
+        '<div class="d">当前使用的大模型 · 来源：'+esc(c?c.p.name:'—')+'</div></div>'+
+        '<div class="ctl"><span class="val mono">'+esc(modelVal)+'</span>'+
+        '<button class="btn sm" data-act="go" data-page="models">切换</button></div></div>'+
+      '</div></div>';
+  h+='<div class="grp">通知</div><div class="card"><div class="rows">'+
+      row('switch',{title:'系统通知',tag:'总开关',desc:'关闭后不再发送任何系统通知（任务完成 / 执行失败）。开启时也只在窗口切到后台（标签页不可见 / 最小化）才提醒',on:true})+
+      '</div></div>';
+  h+='<div class="grp">工具调用轮数</div><div class="card"><div class="rows">'+
+      row('number',{title:'轮数上限',desc:'单次对话中 Agent 连续调用工具的最大迭代次数；任务复杂时调大，耗尽后本轮会明确提示并停止',label:'最大轮数',val:500,min:1})+
+      row('buttons',{title:'保存',desc:'修改后需保存才生效',slot:'gs',buttons:[{label:'保存轮数设置',cls:'primary',msg:'已保存'}]})+
+      '</div></div>';
+  h+='<div class="grp">请求重试</div><div class="card"><div class="rows">'+
+      row('number',{title:'重试次数',desc:'包含首次请求在内；上游限流（429）或瞬时故障时自动重试',label:'次数',val:5,min:1,max:15})+
+      row('select',{title:'间隔模式',desc:'退避模式：1→2→3→6 秒（之后封顶 6 秒）；固定模式：每次等待相同秒数',label:'模式',opts:['退避 1→2→3→6 秒','固定间隔']})+
+      row('number',{title:'基础间隔',desc:'固定模式下每次等待的秒数；4xx 客户端错误（如余额不足）不重试',label:'秒',val:1,min:1,max:60})+
+      row('buttons',{title:'保存',desc:'修改后需保存才生效',slot:'gr',buttons:[{label:'保存重试设置',cls:'primary',msg:'已保存'}]})+
+      '</div></div>';
+  return h;
+}
+
+/* ============================ 页面：模型（核心） ============================ */
+function pageModels(){
+  var h=head('模型','供应商一处维护 Base URL 与密钥，其下模型只填 id —— 同供应商切换模型不必重复配置');
+  var tabs=[['list','模型列表'],['sup','供应商管理'],['add','添加模型']];
+  h+='<div class="tabs">'+tabs.map(function(t){
+    return '<button class="'+(STATE.tab===t[0]?'on':'')+'" data-act="tab" data-tab="'+t[0]+'">'+t[1]+'</button>';
+  }).join('')+'</div>';
+  if(STATE.tab==='list')h+=tabModelList();
+  else if(STATE.tab==='sup')h+=tabProviders();
+  else h+=tabAddModel();
+  return h;
+}
+
+/* ——— tab1：模型列表（按供应商分组，一键切换） ——— */
+function tabModelList(){
+  var h='';
+  PROVIDERS.forEach(function(p){
+    h+='<div class="pg">'+ic('cube',14)+'<b>'+esc(p.name)+'</b>'+
+       '<code class="mono">'+esc(p.base)+'</code>'+
+       '<span class="tag">'+p.models.length+' 个模型共用此 Key</span>'+
+       (p.on?'<span class="tag ok">已启用</span>':'<span class="tag">已禁用</span>')+
+       '<span class="sp"></span>'+
+       '<button class="btn sm" data-act="goto-add" data-prov="'+p.id+'">＋ 添加模型</button></div>';
+    h+= p.models.length? p.models.map(function(m){return modelRow(p,m,false);}).join('')
+                       : '<div class="empty">该供应商下暂无模型</div>';
+  });
+  return '<div class="card">'+h+'</div>';
+}
+
+function modelRow(p,m,full){
+  var c=isCur(p.id,m.id);
+  return '<div class="li">'+
+    '<span class="dot'+(c?'':' o')+'"></span>'+
+    '<div class="lm"><div class="ln">'+esc(m.name||m.id)+
+      (c?'<span class="tag ok">使用中</span>':'')+
+      (m.on?'':'<span class="tag">已禁用</span>')+
+      '</div><div class="ls mono">'+esc(m.id)+' · 上下文 '+fmt(m.ctxIn)+' / '+fmt(m.ctxOut)+'</div></div>'+
+    sw(m.on,'toggle-model',p.id+'|'+m.id)+
+    (c?'':'<button class="btn sm primary" data-act="setcur" data-key="'+p.id+'|'+esc(m.id)+'">设为当前</button>')+
+    '<button class="btn sm" data-act="demo" data-msg="载入编辑（示例）">编辑</button>'+
+    (full?'<button class="btn sm dg" data-act="del-model" data-key="'+p.id+'|'+esc(m.id)+'">删除</button>':'')+
+    '</div>';
+}
+
+/* ——— tab2：供应商管理（主从双栏） ——— */
+function tabProviders(){
+  var list=PROVIDERS.map(function(p){
+    return '<button class="mdi'+(p.id===STATE.prov?' on':'')+'" data-act="pick-prov" data-prov="'+p.id+'">'+
+      '<span class="dd'+(p.on?'':' o')+'"></span>'+esc(p.name)+
+      '<span class="cnt">'+p.models.length+'</span></button>';
+  }).join('')+
+  '<button class="mdi addprov" data-act="demo" data-msg="新建供应商（示例）">＋ 添加供应商</button>';
+
+  var p=findProv(STATE.prov)||PROVIDERS[0];
+  return '<div class="banner">'+ic('info',15)+'<div>'+
+      '<b>供应商机制</b>：Base URL 与 API Key 只在供应商上维护一份。'+
+      '同一供应商下新增或切换模型，只需填 / 选 <b>模型 id</b> —— 不必像现在这样为每个 id 重复填地址和密钥。'+
+      '</div></div>'+
+    '<div class="md"><div class="mdl">'+list+'</div><div class="mdd">'+provDetail(p)+'</div></div>';
+}
+
+function provDetail(p){
+  var h='<div class="mdt">'+esc(p.name)+
+      (p.on?'<span class="tag ok">已启用</span>':'<span class="tag">已禁用</span>')+
+      '<span class="sub">该供应商下 '+p.models.length+' 个模型共用以下配置</span></div>';
+  h+='<div class="card"><div class="rows">'+
+      row('static',{title:'Base URL',desc:'该供应商下所有模型的请求地址，只在此处维护',value:p.base})+
+      row('static',{title:'API 格式',desc:'兼容协议，决定请求体与流式解析方式',value:p.fmt})+
+      '<div class="rw"><div class="m"><div class="t">API Key</div>'+
+        '<div class="d">'+(p.keySource==='env'?'来自环境变量，明文不落盘':'明文存储于 config 目录，绝不下发前端')+'</div></div>'+
+        '<div class="ctl"><span class="val mono" data-keymask>'+esc(keyLabel(p))+'</span>'+
+        '<button class="btn sm" data-act="eye" data-key="'+p.id+'">👁</button></div></div>'+
+      row('switch',{title:'启用该供应商',desc:'禁用后其下模型不可选用（不影响已保存的配置）',on:p.on})+
+      '</div></div>';
+
+  h+='<div class="mdt" style="margin-top:18px">模型 · '+p.models.length+' 个'+
+     '<span class="sub">共用上面的 Base URL 与 Key，切换只需换 id</span></div>';
+  h+='<div class="card">'+(p.models.length?p.models.map(function(m){return modelRow(p,m,true);}).join('')
+      :'<div class="empty">该供应商下暂无模型</div>')+'</div>';
+
+  /* 批量添加：一次写入同一供应商，不用逐个填表 */
+  var avail=(p.discover||[]).filter(function(id){
+    return !p.models.some(function(m){return m.id===id;});
+  });
+  if(avail.length){
+    h+='<div class="pnl"><div class="pnl-h"><span class="pnl-t">上游可用模型<span class="tag bl">'+avail.length+'</span></span>'+
+       '<div class="pnl-s"><input class="inp" type="text" placeholder="筛选模型 id…" data-act="filter-disc">'+
+       '<button class="btn sm" data-act="demo" data-msg="已收起（示例）">收起</button></div></div>'+
+       '<div class="pnl-l" data-disclist>'+avail.map(function(id){
+         return '<label class="pi"><input type="checkbox" value="'+esc(id)+'"><span class="id">'+esc(id)+'</span>'+
+           '<span class="own">继承本供应商 Key</span></label>';
+       }).join('')+'</div>'+
+       '<div class="pnl-f"><span class="rsp" data-slot="batch"></span>'+
+       '<button class="btn sm primary" data-act="batch-add" data-prov="'+p.id+'">添加选中（共用同一 Key）</button></div></div>';
+  }
+
+  h+='<div class="bs">'+
+     '<span class="rsp" data-slot="sup"></span>'+
+     '<button class="btn" data-act="demo" data-msg="连接正常（示例）">测试连接</button>'+
+     '<button class="btn primary" data-act="goto-add" data-prov="'+p.id+'">＋ 添加模型到此供应商</button>'+
+     '</div>';
+  return h;
+}
+
+/* ——— tab3：添加模型（选已有供应商 → 继承配置） ——— */
+function tabAddModel(){
+  var p=STATE.amProv==='__new__'?null:findProv(STATE.amProv);
+  var opts='<option value="__new__"'+(!p?' selected':'')+'>＋ 新建供应商…</option>'+
+    PROVIDERS.map(function(x){
+      return '<option value="'+x.id+'"'+(p&&p.id===x.id?' selected':'')+'>'+esc(x.name)+' — '+esc(x.base)+'</option>';
+    }).join('');
+
+  var h='<div class="card"><div class="form">';
+  h+='<label class="f"><span class="lb">归属供应商</span><span class="sel">'+
+     '<select class="inp" data-act="am-prov">'+opts+'</select>'+ic('chev',14)+'</span></label>';
+
+  if(p){
+    /* 关键：地址与密钥从供应商继承，表单里不再出现这两项 */
+    h+='<div class="f"><span class="lb">请求地址 / 密钥</span><div class="inherit">'+
+       '<div class="ih">'+ic('key',13)+' 继承自供应商 <b>'+esc(p.name)+'</b>，无需重复填写</div>'+
+       '<div class="ir"><span>Base URL</span><code>'+esc(p.base)+'</code></div>'+
+       '<div class="ir"><span>API 格式</span><code>'+esc(p.fmt)+'</code></div>'+
+       '<div class="ir"><span>API Key</span><code>'+esc(keyLabel(p))+'</code></div>'+
+       '</div></div>';
+    h+='<label class="f"><span class="lb">模型 id</span><div class="irow">'+
+       '<input class="inp" type="text" placeholder="如 deepseek-v4-pro-0815">'+
+       '<button class="btn" data-act="demo" data-msg="已拉取上游模型列表（示例）">获取模型列表</button></div></label>';
+    h+='<label class="f"><span class="lb">显示名称</span><input class="inp" type="text" placeholder="界面显示的名称，留空则用模型 id"></label>';
+    h+='<div class="f"><span class="lb">上下文</span><div class="np">'+
+       '<label>输入 <input class="inp" type="number" value="262144"></label>'+
+       '<label>输出 <input class="inp" type="number" value="131072"></label></div></div>';
+    h+='<div class="note">提示：同供应商下要加多个 id，去「供应商管理」用「添加选中」批量写入更快。</div>';
+  }else{
+    /* 新建供应商：这里才需要填地址与密钥 */
+    h+='<label class="f"><span class="lb">供应商名称</span><input class="inp" type="text" placeholder="如 上海模型实验室 / SiliconFlow"></label>';
+    h+='<label class="f"><span class="lb">Base URL</span><input class="inp" type="text" placeholder="https://api.example.com/v1"></label>';
+    h+='<label class="f"><span class="lb">兼容协议</span><span class="sel"><select class="inp">'+
+       '<option>OpenAI</option><option>Anthropic</option></select>'+ic('chev',14)+'</span></label>';
+    h+='<div class="f"><span class="lb">密钥</span><div class="keyseg">'+
+       '<div class="seg" data-seg="key"><button class="on" data-act="demo" data-msg="切换到环境变量">环境变量</button>'+
+       '<button data-act="demo" data-msg="切换到明文密钥">明文密钥</button></div>'+
+       '<input class="inp" type="text" placeholder="变量名，如 OPENAI_API_KEY"></div></div>';
+    h+='<label class="f"><span class="lb">模型 id</span><div class="irow">'+
+       '<input class="inp" type="text" placeholder="如 gpt-4o / claude-sonnet-4">'+
+       '<button class="btn" data-act="demo" data-msg="已拉取上游模型列表（示例）">获取模型列表</button></div></label>';
+    h+='<label class="f"><span class="lb">显示名称</span><input class="inp" type="text" placeholder="界面显示的名称"></label>';
+    h+='<div class="f"><span class="lb">上下文</span><div class="np">'+
+       '<label>输入 <input class="inp" type="number" value="262144"></label>'+
+       '<label>输出 <input class="inp" type="number" value="131072"></label></div></div>';
+  }
+
+  /* 上游发现面板 */
+  h+='<div class="pnl"><div class="pnl-h"><span class="pnl-t">上游可用模型<span class="tag bl">'+
+     ((p&&p.discover)?p.discover.length:3)+'</span></span>'+
+     '<div class="pnl-s"><input class="inp" type="text" placeholder="筛选模型 id…" data-act="filter-disc">'+
+     '<button class="btn sm" data-act="demo" data-msg="已收起（示例）">收起</button></div></div>'+
+     '<div class="pnl-l" data-disclist>'+((p&&p.discover)?p.discover:['gpt-4o-mini','gpt-4.1','o4-mini']).map(function(id){
+       return '<label class="pi"><input type="checkbox" value="'+esc(id)+'"><span class="id">'+esc(id)+'</span></label>';
+     }).join('')+'</div>'+
+     '<div class="pnl-f"><span class="rsp" data-slot="disc"></span>'+
+     '<button class="btn sm primary" data-act="batch-add" data-prov="'+(p?p.id:'')+'">添加选中</button></div></div>';
+
+  h+='</div><div class="foot"><span class="rsp" data-slot="am"></span>'+
+     '<button class="btn" data-act="demo" data-msg="连接正常（示例）">测试连接</button>'+
+     '<button class="btn" data-act="demo" data-msg="已重置（示例）">重置</button>'+
+     '<button class="btn primary" data-act="demo" data-msg="已保存（示例）">保存</button>'+
+     '</div></div>';
+  return h;
+}
+
+/* ============================ 页面：外观 ============================ */
+function pageAppearance(){
+  var h=head('外观','对话框尺寸、思考特效与背景');
+  h+='<div class="grp">对话框</div><div class="card"><div class="rows">'+
+      row('slider',{title:'对话框宽度',desc:'输入框与消息列的最大宽度',min:480,max:1000,step:20,val:760,unit:'px'})+
+      row('slider',{title:'对话框高度',desc:'输入框最小高度（内容多时仍会自动长高）',min:44,max:200,step:4,val:68,unit:'px'})+
+      '</div></div>';
+  h+='<div class="grp">最高思考强度特效</div><div class="card"><div class="rows">'+
+      row('seg',{title:'动画皮肤',desc:'思考强度拉满时滑条的动画皮肤',seg:'skin',opts:['Meteor','Forge'],active:0})+
+      '</div></div>';
+  h+='<div class="grp">界面风格</div><div class="card"><div class="rows">'+
+      row('switch',{title:'新外观',desc:'侧栏与面板呈现玻璃质感的新界面风格',on:true})+
+      '</div></div>';
+  h+='<div class="grp">自定义背景图</div><div class="card"><div class="rows">'+
+      row('buttons',{title:'背景图',desc:'位于最底层，不遮挡任何文字与按钮（Windows / 安卓弹系统选择器，Linux 用内置选择器）',slot:'bg',
+        buttons:[{label:'选择图片',cls:'primary',msg:'已选择'},{label:'清除',msg:'已清除'}]})+
+      '</div></div>';
+  h+='<div class="grp">背景效果</div><div class="card"><div class="rows">'+
+      row('slider',{title:'背景模糊值',desc:'0 为不模糊',min:0,max:40,step:1,val:12,unit:'px'})+
+      row('slider',{title:'背景亮度',desc:'调暗背景让前景更清晰',min:20,max:100,step:1,val:80,unit:'%'})+
+      '</div></div>';
+  return h;
+}
+
+/* ============================ 其余页面 ============================ */
+function pageMemory(){
+  return head('记忆','当前项目的长期记忆')+
+    '<div class="grp">用户记忆</div><div class="card">'+
+    '<div class="note" style="padding:12px 16px 2px">对话中让 AI「记住…」自动保存，也可在此手动管理</div>'+
+    '<div class="add"><input class="inp" type="text" placeholder="新增一条记忆，如：回复风格保持简洁">'+
+    '<button class="btn primary" data-act="demo" data-msg="已添加记忆（示例）">添加</button></div>'+
+    '<div class="list">'+MEM.map(function(m){
+      return '<div class="li"><span class="ltext">'+esc(m.text)+'</span><span class="lmeta">'+esc(m.meta)+'</span>'+
+        '<button class="btn sm" data-act="demo" data-msg="删除记忆（示例）">删除</button></div>';
+    }).join('')+'</div></div>';
+}
+function pageSkills(){
+  return head('技能','项目技能目录与触发词')+
+    '<div class="grp">项目技能</div><div class="card">'+
+    '<div class="note" style="padding:12px 16px 2px">技能目录：&lt;workspace&gt;/.codeforge/skills/&lt;名称&gt;/SKILL.md，编辑文件管理；对话中 @技能名 或命中触发词时自动生效</div>'+
+    '<div class="list">'+SKILLS.map(function(s){
+      return '<div class="li"><div class="lm"><div class="ln">'+esc(s.name)+'<span class="tag bl">'+esc(s.tag)+'</span></div>'+
+        '<div class="ls">'+esc(s.sub)+'</div></div></div>';
+    }).join('')+'</div></div>';
+}
+function pageBuiltin(){
+  return head('插件','进程内增强能力')+
+    '<div class="grp">内置插件</div><div class="card">'+
+    '<div class="note" style="padding:12px 16px 2px">AI 在对话中按调用时机自主决定是否使用；关闭后立即生效并持久化</div>'+
+    '<div class="list">'+PLUGINS.map(function(p){
+      return '<div class="li"><div class="lm"><div class="ln">'+esc(p.name)+'</div><div class="ls">'+esc(p.sub)+'</div></div>'+
+        sw(p.on)+'</div>';
+    }).join('')+'</div></div>';
+}
+function pageSubagents(){
+  var h=head('子智能体','多智能体协作的开关与能力边界');
+  h+='<div class="grp">多智能体协作</div><div class="card"><div class="rows">'+
+     row('switch',{title:'并行委派',tag:'总开关',desc:'允许主智能体把互不重叠的探索 / 实现任务并行委派给子智能体。关闭后该能力完全不可用（与「插件」页的内置插件开关同一项）',on:true})+
+     '</div></div>';
+  h+='<div class="grp">并发上限</div><div class="card"><div class="rows">'+
+     row('slider',{title:'同时运行数',desc:'一次委派最多同时运行几个子智能体（上限 5，只能调小）',min:1,max:5,step:1,val:3,unit:' 个'})+
+     '</div></div>';
+  h+='<div class="grp">能力限制</div><div class="card"><div class="rows">'+
+     row('switch',{title:'允许写入文件',desc:'关闭后所有子智能体一律只读：只能读取、列目录、搜索，改动交由主智能体执行',on:true})+
+     row('switch',{title:'允许删除文件',desc:'关闭后子智能体只能写入 / 编辑，删除动作需要主智能体执行',on:false})+
+     row('switch',{title:'允许写入记忆',desc:'关闭后子智能体不能调用 save_memory 修改项目长期记忆',on:true})+
+     row('note',{title:'固定边界',desc:'探索（explore）型子任务始终只读，不受这里影响；子智能体永远无法运行命令、加载插件或再次委派'})+
+     '</div></div>';
+  return h;
+}
+function pageMcp(){
+  var h=head('MCP 服务','本地与远程 MCP 服务的注册与管理');
+  h+='<div class="tabs"><button class="on">已注册服务</button><button data-act="demo" data-msg="切换到添加服务（示例）">添加服务</button></div>';
+  h+='<div class="card"><div class="rows">'+
+     row('static',{title:'已安装',desc:'MCP（stdio）/ 远程 MCP（Streamable HTTP）/ HTTP / WASM 插件统一在此查看与管理',value:'2 个服务'})+
+     '</div><div class="list">'+MCP.map(function(m){
+       return '<div class="li"><span class="dot'+(m.on?'':' o')+'"></span>'+
+         '<div class="lm"><div class="ln">'+esc(m.name)+'</div><div class="ls">'+esc(m.sub)+'</div></div>'+
+         sw(m.on)+'<button class="btn sm dg" data-act="demo" data-msg="删除服务（示例）">删除</button></div>';
+     }).join('')+'</div></div>';
+  h+='<div class="grp">添加服务</div><div class="card"><div class="form">'+
+     fld('名称','text','如 filesystem / parallel_search')+
+     fld('类型','select',null,['本地（stdio · 命令启动）','远程（Streamable HTTP · URL 端点）'])+
+     fld('启动命令','text','如 npx / python')+
+     fld('参数','text','空格分隔，如 -y @modelcontextprotocol/server-filesystem')+
+     fld('端点 URL','text','如 https://search.parallel.ai/mcp')+
+     fld('环境变量','text','可选，KEY=VALUE 空格分隔')+
+     fld('描述','text','可选')+
+     '</div><div class="foot"><span class="rsp" data-slot="mcp"></span>'+
+     '<button class="btn primary" data-act="demo" data-msg="已创建（示例）">＋ 新建 MCP 服务器</button></div></div>';
+  return h;
+}
+function pageArchived(){
+  return head('归档','已归档的会话，满 10 天自动删除')+
+    '<div class="grp">已归档的会话</div><div class="card"><div class="list">'+ARCHIVED.map(function(a){
+      return '<div class="li"><div class="lm"><div class="ln">'+esc(a.name)+'</div><div class="ls">'+esc(a.sub)+'</div></div>'+
+        '<button class="btn sm" data-act="demo" data-msg="已恢复会话（示例）">恢复</button>'+
+        '<button class="btn sm dg" data-act="demo" data-msg="已永久删除（示例）">删除</button></div>';
+    }).join('')+'</div></div>';
+}
+
+/* ============================ 渲染原语 ============================ */
+function head(t,d){return '<div class="head"><h1>'+esc(t)+'</h1><p>'+esc(d)+'</p></div>';}
+function row(kind,o){
+  var c=ctlHTML(kind,o);
+  var head_='<div class="m"><div class="t">'+esc(o.title)+(o.tag?'<span class="tag">'+esc(o.tag)+'</span>':'')+'</div>'+
+    (o.desc?'<div class="d">'+esc(o.desc)+'</div>':'')+'</div>';
+  return '<div class="rw">'+head_+(c?'<div class="ctl'+(kind==='slider'||kind==='buttons'?' grow':'')+'">'+c+'</div>':'')+'</div>';
+}
+function ctlHTML(kind,o){
+  switch(kind){
+    case 'static': return '<span class="val mono" title="'+esc(o.value)+'">'+esc(o.value)+'</span>';
+    case 'switch': return sw(o.on);
+    case 'slider': return '<div class="sld"><input type="range" min="'+o.min+'" max="'+o.max+'" step="'+o.step+'" value="'+o.val+'" data-act="range"><span class="v mono">'+o.val+o.unit+'</span></div>';
+    case 'number': return '<label class="mini"><span class="lb">'+esc(o.label)+'</span><input class="inp n" type="number" value="'+o.val+'"'+(o.min!==undefined?' min="'+o.min+'"':'')+(o.max!==undefined?' max="'+o.max+'"':'')+'></label>';
+    case 'select': return '<label class="mini"><span class="lb">'+esc(o.label)+'</span><span class="sel" style="width:200px"><select class="inp">'+o.opts.map(function(x){return '<option>'+esc(x)+'</option>';}).join('')+'</select>'+ic('chev',14)+'</span></label>';
+    case 'seg': return '<div class="seg" data-seg="'+o.seg+'">'+o.opts.map(function(x,i){return '<button'+(i===o.active?' class="on"':'')+'>'+esc(x)+'</button>';}).join('')+'</div>';
+    case 'buttons': return '<div class="bs" style="margin:0"><span class="rsp" data-slot="'+o.slot+'"></span>'+o.buttons.map(function(b){
+        return '<button class="btn '+(b.cls||'')+'" data-act="save" data-slot="'+o.slot+'" data-msg="'+esc(b.msg)+'">'+esc(b.label)+'</button>';}).join('')+'</div>';
+    case 'note': return '';
+  }
+  return '';
+}
+function fld(label,type,ph,opts){
+  if(type==='select')return '<label class="f"><span class="lb">'+esc(label)+'</span><span class="sel"><select class="inp">'+
+    opts.map(function(o){return '<option>'+esc(o)+'</option>';}).join('')+'</select>'+ic('chev',14)+'</span></label>';
+  return '<label class="f"><span class="lb">'+esc(label)+'</span><input class="inp" type="text" placeholder="'+esc(ph||'')+'"></label>';
+}
+
+/* ============================ 装配 ============================ */
+var navEl=document.getElementById('nav'), mainEl=document.getElementById('main'), toastEl=document.getElementById('toast');
+var RENDER={general:pageGeneral,models:pageModels,appearance:pageAppearance,memory:pageMemory,
+  skills:pageSkills,builtin:pageBuiltin,subagents:pageSubagents,mcp:pageMcp,archived:pageArchived};
+
+function renderNav(){
+  var g={};
+  PAGES.forEach(function(p){(g[p.group]=g[p.group]||[]).push(p);});
+  var h='<button class="nav-back" data-act="demo" data-msg="返回工作区（示例）">'+ic('back')+'<span>返回</span></button>';
+  Object.keys(g).forEach(function(k){
+    h+='<div class="ng">'+esc(k)+'</div>';
+    h+=g[k].map(function(p){
+      return '<button class="ni'+(STATE.page===p.id?' on':'')+'" data-act="go" data-page="'+p.id+'">'+ic(p.icon)+'<span>'+esc(p.label)+'</span></button>';
+    }).join('');
+  });
+  navEl.innerHTML=h;
+}
+function renderMain(){
+  mainEl.innerHTML='<div class="w">'+(RENDER[STATE.page]||pageGeneral)()+'</div>';
+  mainEl.scrollTop=0;
+}
+function renderCurLabel(){
+  var c=curModel();
+  document.getElementById('cur-model-label').textContent=c?((c.m.name||c.m.id)+' · '+c.p.name):'未配置';
+}
+function render(){renderNav();renderMain();renderCurLabel();}
+
+var toastT;
+function toast(msg){
+  toastEl.textContent=msg;toastEl.classList.add('on');
+  clearTimeout(toastT);toastT=setTimeout(function(){toastEl.classList.remove('on');},1400);
+}
+function flash(slot,msg){
+  var el=mainEl.querySelector('[data-slot="'+slot+'"]');
+  if(!el)return;
+  el.textContent=msg;
+  setTimeout(function(){if(el.textContent===msg)el.textContent='';},1600);
+}
+
+/* 事件：统一委托，避免重渲染后失效 */
+document.addEventListener('click',function(e){
+  var t=e.target.closest('[data-act]');
+  if(!t)return;
+  var act=t.dataset.act, key=t.dataset.key||'';
+
+  if(act==='go'){ STATE.page=t.dataset.page; render(); return; }
+
+  if(act==='tab'){ STATE.tab=t.dataset.tab; render(); return; }
+
+  if(act==='pick-prov'){ STATE.prov=t.dataset.prov; render(); return; }
+
+  if(act==='goto-add'){ STATE.amProv=t.dataset.prov||STATE.amProv; STATE.tab='add'; render(); return; }
+
+  if(act==='setcur'){
+    var a=key.split('|');
+    STATE.cur={p:a[0],m:a[1]};
+    render();
+    var c=curModel();
+    toast('已切换到 '+(c?(c.m.name||c.m.id):'')+'（示例）');
+    return;
+  }
+
+  if(act==='toggle-model'){
+    var b=key.split('|'), pp=findProv(b[0]);
+    if(pp)for(var i=0;i<pp.models.length;i++){if(pp.models[i].id===b[1])pp.models[i].on=!pp.models[i].on;}
+    render(); return;
+  }
+
+  if(act==='del-model'){
+    var c2=key.split('|'), p2=findProv(c2[0]);
+    if(p2){p2.models=p2.models.filter(function(m){return m.id!==c2[1];});}
+    render(); toast('已删除模型（示例）'); return;
+  }
+
+  if(act==='batch-add'){
+    var pid=t.dataset.prov, prov=findProv(pid);
+    var boxes=mainEl.querySelectorAll('[data-disclist] input[type=checkbox]:checked');
+    var ids=[];
+    for(var j=0;j<boxes.length;j++)ids.push(boxes[j].value);
+    if(!ids.length){flash(t.dataset.prov?'sup':'disc','请先勾选模型 id');return;}
+    if(prov){
+      ids.forEach(function(id){
+        if(!prov.models.some(function(m){return m.id===id;})){
+          prov.models.push({id:id,name:id,ctxIn:262144,ctxOut:131072,on:true});
+        }
+      });
+      STATE.prov=prov.id; render();
+      toast('已添加 '+ids.length+' 个模型（共用该供应商 Key）');
+    }else{
+      toast('已添加选中 '+ids.length+' 个模型（示例）');
+    }
+    return;
+  }
+
+  if(act==='save'){ flash(t.dataset.slot,t.dataset.msg||'已保存'); toast(t.dataset.msg||'已保存'); return; }
+
+  if(act==='demo'){ toast(t.dataset.msg||'示例操作'); return; }
+});
+
+/* 输入类：change / input */
+document.addEventListener('change',function(e){
+  var t=e.target.closest('[data-act]');
+  if(!t)return;
+  if(t.dataset.act==='am-prov'){ STATE.amProv=t.value; render(); return; }
+  if(t.dataset.act==='toggle-model'){ /* 已被 click 处理，避免重复 */ return; }
+});
+document.addEventListener('input',function(e){
+  var t=e.target;
+  if(t.matches&&t.matches('input[type=range][data-act=range]')){
+    var out=t.parentElement.querySelector('.v');
+    var unit=(out.textContent.match(/[^\d.-]+$/)||[''])[0];
+    out.textContent=t.value+unit;
+    return;
+  }
+  if(t.matches&&t.matches('[data-act=filter-disc]')){
+    var q=t.value.toLowerCase(), box=t.closest('.pnl').querySelector('[data-disclist]');
+    box.querySelectorAll('.pi').forEach(function(pi){
+      pi.style.display=pi.querySelector('.id').textContent.toLowerCase().indexOf(q)>=0?'':'none';
+    });
+  }
+});
+/* 分段按钮 */
+document.addEventListener('click',function(e){
+  var b=e.target.closest('.seg button');
+  if(!b)return;
+  var seg=b.closest('.seg');
+  seg.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
+  b.classList.add('on');
+});
+
+render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CodeForge · 设置布局重构（5 套）</title>
+<!--
+  重构说明
+  - 单一数据源 SECTIONS：9 个设置页 + 全部控件（开关/滑条/数字/下拉/分段/表单/列表），与原 settings-ui-export.html 一一对应，不增不减。
+  - A 分组侧栏（Codex 风）：左分组导航 + 单列设置行，控件靠右。
+  - B 主从双栏（Z.ai 风）：左导航 + 左条目列 / 右详情表单。
+  - C 顶部标签：顶部横排标签 + 双列卡片网格。
+  - D 图标窄栏：68px 图标栏 + 单列堆叠表单（控件全宽）。
+  - E 单页画布：无左导航，一页到底 + 右侧锚点目录。
+-->
+<style>
+:root{
+  --bg:#fff;--side:#fafbfc;--elev:#f1f3f6;--line:#e6e8ee;--line2:#eef0f4;
+  --text:#171a21;--dim:#6b7280;--dim2:#98a0ad;--accent:#4373f5;--accent2:#eef2fe;
+  --ok:#16a34a;--ok2:#e8f7ee;--danger:#dc2626;
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Consolas,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+h1,h2,h3{margin:0;font-weight:600}
+.mono{font-family:var(--mono)}
+/* 预览壳 */
+.stagebar{height:52px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#171a21;color:#fff}
+.sb-title{font-size:13px;font-weight:600;white-space:nowrap}
+.sb-tabs{display:flex;gap:4px;flex:1;overflow-x:auto}
+.sb-tab{border:none;background:rgba(255,255,255,.08);color:#c9cfdb;height:30px;padding:0 12px;border-radius:8px;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.sb-tab:hover{background:rgba(255,255,255,.16);color:#fff}
+.sb-tab.on{background:#fff;color:#171a21;font-weight:600}
+.sb-check{font-size:12px;color:#8ee0a8;white-space:nowrap;background:rgba(22,163,74,.16);padding:4px 10px;border-radius:999px}
+#stage{height:calc(100vh - 52px);overflow:hidden;background:var(--bg)}
+/* 通用 */
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.grp{font-size:13px;font-weight:600;color:var(--dim);margin:26px 0 8px}
+.head h1{font-size:22px;letter-spacing:-.2px}
+.head p{margin:6px 0 0;color:var(--dim);font-size:13px}
+.rows{display:flex;flex-direction:column}
+.rw{display:flex;align-items:center;gap:18px;padding:13px 16px;border-top:1px solid var(--line2)}
+.rows>.rw:first-child{border-top:none}
+.m{display:flex;flex:1;min-width:0}
+.t{font-size:13.5px;font-weight:500}
+.d{font-size:12.5px;color:var(--dim);margin-top:2px}
+.ctl{flex:none;display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.ctl.grow{flex:1;max-width:420px}
+.tag{font-size:11px;padding:1px 6px;border-radius:6px;background:var(--elev);color:var(--dim);margin-left:6px;vertical-align:1px}
+.tag.ok{background:var(--ok2);color:var(--ok)}
+.tag.bl{background:var(--accent2);color:var(--accent)}
+.val{font-size:12.5px;color:var(--dim);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}
+.note{font-size:12.5px;color:var(--dim2)}
+/* 开关 */
+.sw{position:relative;display:inline-block;width:42px;height:24px;flex:none;cursor:pointer}
+.sw input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.sw i{position:absolute;inset:0;border-radius:999px;background:#dfe3ea;transition:background .18s}
+.sw i::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(20,25,40,.22);transition:transform .18s}
+.sw input:checked+i{background:var(--accent)}
+.sw input:checked+i::after{transform:translateX(18px)}
+/* 滑条 */
+.sld{display:flex;align-items:center;gap:10px;min-width:230px}
+.sld input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:999px;background:#e6e9ef;outline:none;margin:0;cursor:pointer}
+.sld input::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:1.5px solid var(--accent);box-shadow:0 1px 3px rgba(20,25,40,.2)}
+.sld input::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:#fff;border:1.5px solid var(--accent)}
+.sld .v{font-size:12.5px;color:var(--dim);min-width:48px;text-align:right}
+/* 分段 */
+.seg{display:inline-flex;background:var(--elev);border-radius:10px;padding:2px;gap:2px}
+.seg button{border:none;background:transparent;height:28px;padding:0 13px;border-radius:8px;font:inherit;font-size:12.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
+.seg button.on{background:#fff;color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(20,25,40,.1)}
+/* 按钮 */
+.btn{height:34px;padding:0 14px;border:1px solid var(--line);background:#fff;color:var(--text);border-radius:9px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#f7f8fa}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#3563e0}
+.btn.sm{height:28px;padding:0 10px;font-size:12px;border-radius:8px}
+.btn.dg{color:var(--danger)}.btn.dg:hover{background:#fdf1f1;border-color:#f5c9c9}
+.bs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rsp{font-size:12px;color:var(--ok)}.rsp.e{color:var(--danger)}
+/* 输入 */
+.inp{width:100%;height:36px;border:1px solid var(--line);border-radius:9px;padding:0 11px;font:inherit;font-size:13px;background:#fff;color:var(--text)}
+.inp::placeholder{color:var(--dim2)}
+.inp:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent2)}
+.inp.n{width:96px}
+.mini{display:flex;align-items:center;gap:8px;flex:none}
+.mini .lb{font-size:12.5px;color:var(--dim);white-space:nowrap}
+select.inp{appearance:none;-webkit-appearance:none;padding-right:30px;cursor:pointer}
+.sel{position:relative;display:block}
+.sel svg{position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--dim);pointer-events:none}
+.form{padding:14px 16px;display:flex;flex-direction:column;gap:13px}
+.f{display:flex;flex-direction:column;gap:6px}
+.f>.lb{font-size:12.5px;color:var(--dim)}
+.irow{display:flex;gap:8px;align-items:center}
+.irow .inp{flex:1}
+.np{display:flex;gap:14px;flex-wrap:wrap}
+.np label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim)}
+.np .inp{width:120px}
+.foot{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--line2);background:#fcfcfd}
+.foot .rsp{margin-right:auto}
+/* 列表 */
+.list{display:flex;flex-direction:column}
+.li{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line2);font-size:13px}
+.li:first-child{border-top:none}
+.lm{flex:1;min-width:0}
+.ln{font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:7px}
+.ln .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.ln .dot.o{background:#d3d8e0}
+.ls{font-size:12px;color:var(--dim);margin-top:2px;word-break:break-all}
+.ltext{flex:1;color:var(--text);word-break:break-all}
+.lmeta{font-size:11.5px;color:var(--dim2);flex:none}
+.add{display:flex;gap:8px;padding:14px 16px;border-top:1px solid var(--line2)}
+.add .inp{flex:1}
+/* 发现面板 */
+.pnl{margin:0 16px 14px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.pnl-h{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fcfcfd;border-bottom:1px solid var(--line2)}
+.pnl-t{font-size:13px;font-weight:600;flex:none}
+.pnl-t .tag{margin-left:6px}
+.pnl-s{display:flex;gap:8px;flex:1;justify-content:flex-end}
+.pnl-s .inp{max-width:180px;height:30px;font-size:12.5px}
+.pnl-l{max-height:190px;overflow:auto}
+.pnl-l .pi{display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;border-top:1px solid var(--line2)}
+.pnl-l .pi:first-child{border-top:none}
+.pi input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
+.pi .id{flex:1;font-family:var(--mono);font-size:12.5px}
+.pnl-f{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:10px 12px;border-top:1px solid var(--line2);background:#fcfcfd}
+.pnl-f .rsp{margin-right:auto}
+/* 标签页 */
+.tb{display:flex;gap:2px;margin-bottom:14px;background:var(--elev);border-radius:10px;padding:3px;width:max-content}
+.tb button{border:none;background:transparent;height:30px;padding:0 14px;border-radius:8px;font:inherit;font-size:12.5px;color:var(--dim);cursor:pointer}
+.tb button.on{background:#fff;color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(20,25,40,.1)}
+.pane{display:none}.pane.on{display:block}
+/* ===== A 分组侧栏 ===== */
+.lA,.lB,.lD{display:flex;height:100%}
+.sA{width:262px;flex:none;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px 10px;overflow-y:auto}
+.ni{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 10px;border:none;background:transparent;border-radius:9px;font:inherit;font-size:13.5px;color:var(--text);cursor:pointer}
+.ni:hover{background:var(--elev)}
+.ni.on{background:#e7eaef;font-weight:600}
+.ni svg{color:var(--dim);flex:none}.ni.on svg{color:var(--text)}
+.ng{font-size:11.5px;color:var(--dim2);padding:14px 10px 4px;letter-spacing:.4px}
+.mA{flex:1;overflow-y:auto;padding:40px 48px 90px}
+.mA .w{max-width:920px;margin:0 auto}
+.mA .card+.grp{margin-top:30px}
+/* ===== B 主从双栏 ===== */
+.sB{width:236px;padding:14px 10px;background:var(--side);border-right:1px solid var(--line);overflow-y:auto}
+.mB{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.hB{padding:30px 40px 18px;border-bottom:1px solid var(--line)}
+.hB h1{font-size:21px}.hB p{margin:6px 0 0;font-size:13px;color:var(--dim)}
+.bB{flex:1;overflow:auto;padding:22px 40px 60px}
+.md{display:grid;grid-template-columns:220px minmax(0,1fr);border:1px solid var(--line);border-radius:14px;overflow:hidden;min-height:440px;background:#fff}
+.mdl{background:var(--side);border-right:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:2px}
+.mdi{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:9px 10px;border:none;background:transparent;border-radius:9px;font:inherit;font-size:13px;color:var(--text);cursor:pointer}
+.mdi:hover{background:var(--elev)}
+.mdi.on{background:#e7eaef;font-weight:600}
+.mdi .dd{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
+.mdi .dd.o{background:#d3d8e0}
+.mdi.on .dd{background:var(--accent)}
+/* 供应商分组 / 管理 */
+.sg{display:flex;align-items:center;gap:8px;padding:10px 16px;background:#fcfcfd;border-bottom:1px solid var(--line2);font-size:12px;font-weight:600;color:var(--dim)}
+.sg .n{flex:1}
+.sg .cnt{font-weight:400;color:var(--dim2)}
+.mdd{padding:18px 20px 22px;min-width:0}
+.mdt{font-size:13px;font-weight:600;color:var(--dim);margin-bottom:10px}
+.mdd .card{border:none;border-radius:0}
+.mdd .rw{align-items:stretch;flex-direction:column;gap:8px;padding:13px 2px}
+.mdd .ctl{justify-content:flex-start;width:100%}
+.mdd .ctl,.mdd .sld{width:100%;max-width:none}
+.mdd .form{padding:6px 2px}
+.mdd .li{padding:12px 2px}
+.mdd .add{padding:12px 2px}
+.mdd .pnl{margin:6px 2px 8px}
+/* ===== C 顶部标签 ===== */
+.lC{display:flex;flex-direction:column;height:100%}
+.tC{height:54px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line)}
+.tt{display:flex;gap:2px;flex:1;overflow-x:auto;padding:0 4px}
+.tt button{border:none;background:transparent;height:32px;padding:0 12px;border-radius:9px;font:inherit;font-size:13px;color:var(--dim);cursor:pointer;white-space:nowrap}
+.tt button:hover{background:var(--elev);color:var(--text)}
+.tt button.on{background:var(--elev);color:var(--text);font-weight:600}
+.bC{flex:1;overflow:auto;padding:28px 32px 70px}
+.gC{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:16px;align-items:start;max-width:1060px;margin:0 auto}
+/* ===== D 图标窄栏 ===== */
+.rD{width:68px;flex:none;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0}
+.rb{width:44px;height:40px;border:none;background:transparent;border-radius:11px;display:grid;place-items:center;color:var(--dim);cursor:pointer}
+.rb:hover{background:var(--elev);color:var(--text)}
+.rb.on{background:var(--accent2);color:var(--accent)}
+.mD{flex:1;overflow:auto;padding:36px 0 80px}
+.mD .w{max-width:800px;margin:0 auto;padding:0 32px}
+.mD .rw{flex-direction:column;align-items:stretch;gap:9px}
+.mD .rw.k-switch,.mD .rw.k-static{flex-direction:row;align-items:center}
+.mD .ctl{width:100%;justify-content:flex-start}
+.mD .ctl.grow{max-width:none}
+.mD .sld{width:100%}
+.mD .card+.grp{margin-top:26px}
+/* ===== E 单页画布 ===== */
+.lE{display:flex;height:100%}
+.me{flex:1;overflow:auto;padding:0 0 100px}
+.tp{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:14px 48px;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.tocw{width:196px;flex:none;border-left:1px solid var(--line);background:var(--side);padding:26px 12px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.tl{font-size:11.5px;color:var(--dim2);letter-spacing:.4px;padding:0 10px 8px}
+.ti{border:none;background:transparent;text-align:left;padding:7px 10px;border-radius:8px;font:inherit;font-size:13px;color:var(--dim);cursor:pointer}
+.ti:hover{background:var(--elev);color:var(--text)}
+.ti.on{background:#e7eaef;color:var(--text);font-weight:600}
+.me .w{max-width:740px;margin:0 auto;padding:26px 48px 0}
+.sec{padding-top:22px}
+.sec+.sec{border-top:1px solid var(--line);margin-top:34px;padding-top:30px}
+.sec h2{font-size:19px;letter-spacing:-.2px;margin-bottom:4px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);background:#171a21;color:#fff;font-size:12.5px;padding:8px 14px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;z-index:99}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="stagebar">
+  <span class="sb-title">设置布局重构预览</span>
+  <div class="sb-tabs" id="tabs">
+    <button class="sb-tab on" data-l="a">A · 分组侧栏</button>
+    <button class="sb-tab" data-l="b">B · 主从双栏</button>
+    <button class="sb-tab" data-l="c">C · 顶部标签</button>
+    <button class="sb-tab" data-l="d">D · 图标窄栏</button>
+    <button class="sb-tab" data-l="e">E · 单页画布</button>
+  </div>
+  <span class="sb-check" id="chk"></span>
+</div>
+<div id="stage"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function(){
+'use strict';
+/* ===== 图标 ===== */
+var IC={
+ gear:'<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/>',
+ cube:'<path d="M12 2.6 20.5 7v10L12 21.4 3.5 17V7z"/><path d="M3.5 7 12 11.6 20.5 7M12 11.6v9.8"/>',
+ sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+ brain:'<path d="M9.6 3.4A3.4 3.4 0 0 0 6.2 6.8a3 3 0 0 0-1.4 5.3 3 3 0 0 0 1.6 5.4 3.2 3.2 0 0 0 3.2 2.1 3 3 0 0 0 2.4-1.3V4.9a3 3 0 0 0-2.4-1.5z"/><path d="M14.4 3.4a3.4 3.4 0 0 1 3.4 3.4 3 3 0 0 1 1.4 5.3 3 3 0 0 1-1.6 5.4 3.2 3.2 0 0 1-3.2 2.1"/>',
+ bolt:'<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
+ puzzle:'<path d="M10.5 3.6a1.9 1.9 0 1 1 3.8 0V4.5H17a1.6 1.6 0 0 1 1.6 1.6v2.7h.9a1.9 1.9 0 1 1 0 3.8h-.9V16A1.6 1.6 0 0 1 17 17.6h-2.7v.9a1.9 1.9 0 1 1-3.8 0v-.9H7.8A1.6 1.6 0 0 1 6.2 16v-2.7H5.3a1.9 1.9 0 1 1 0-3.8h.9V6.1a1.6 1.6 0 0 1 1.6-1.6h2.7z"/>',
+ nodes:'<circle cx="12" cy="4.6" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M12 6.8v5M12 11.8 6.4 17.2M12 11.8l5.6 5.4"/>',
+ hub:'<circle cx="5" cy="12" r="2.4"/><circle cx="19" cy="12" r="2.4"/><circle cx="12" cy="5" r="2.4"/><circle cx="12" cy="19" r="2.4"/><path d="M7.2 10.8 10.4 6.7M16.8 10.8 13.6 6.7M7.2 13.2l3.2 4.1M16.8 13.2l-3.2 4.1"/>',
+ box:'<path d="M21 8v13H3V8M1.5 3h21v5h-21zM10 12h4"/>',
+ back:'<path d="M19 12H5M12 19l-7-7 7-7"/>',
+ chev:'<path d="m6 9 6 6 6-6"/>'};
+function ic(n,s){s=s||15;return '<svg viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+IC[n]+'</svg>';}
+/* ===== 单一数据源：9 页 + 控件（不增不减） ===== */
+function R(k,o){o.kind=k;return o;}
+var SEC=[
+{id:'general',label:'常规',icon:'gear',group:'个人',desc:'工作区、模型、通知与执行策略',blocks:[
+ {label:'项目信息',type:'rows',rows:[
+  R('static',{title:'项目',desc:'Agent 读写文件的根目录',value:'C:\\Users\\26536\\Desktop\\Code\\CodeForge-GO'}),
+  R('static',{title:'模型',desc:'当前使用的大模型',value:'glm-5.3'})]},
+ {label:'通知',type:'rows',rows:[
+  R('switch',{title:'系统通知',tag:'总开关',desc:'任务完成或执行失败时提醒；窗口在后台才发送',on:true})]},
+ {label:'工具调用轮数',type:'rows',rows:[
+  R('number',{title:'轮数上限',desc:'单次对话中连续调用工具的最大迭代次数',label:'最大轮数',val:500,min:1}),
+  R('buttons',{title:'保存',desc:'修改后需保存才生效',slot:'gs',buttons:[{label:'保存轮数设置',cls:'primary',msg:'已保存'}]})]},
+ {label:'请求重试',type:'rows',rows:[
+  R('number',{title:'重试次数',desc:'包含首次请求在内',label:'次数',val:5,min:1,max:15}),
+  R('select',{title:'间隔模式',desc:'上游限流或瞬时故障时的等待策略',label:'模式',opts:['退避 1→2→3→6 秒','固定间隔']}),
+  R('number',{title:'基础间隔',desc:'固定模式下每次等待的秒数',label:'秒',val:1,min:1,max:60}),
+  R('buttons',{title:'保存',desc:'4xx 客户端错误不重试',slot:'gr',buttons:[{label:'保存重试设置',cls:'primary',msg:'已保存'}]})]}]},
+{id:'models',label:'模型',icon:'cube',group:'个人',desc:'按供应商管理模型，可一键切换同供应商下的其他模型',tabs:true,blocks:[
+ {label:'模型列表',tab:'list',type:'supplierlist'},
+ {label:'供应商管理',tab:'sup',type:'suppliers'},
+ {label:'添加模型',tab:'add',type:'form',fields:[
+  {label:'供应商',type:'select',opts:['Z.ai','OpenAI','Anthropic','自定义']},
+  {label:'显示名称',type:'text',ph:'界面显示的名称'},
+  {label:'模型 id',type:'action',ph:'如 gpt-4o / claude-sonnet-4',action:'获取模型列表'},
+  {label:'请求地址',type:'text',ph:'https://api.openai.com/v1'},
+  {label:'密钥',type:'key'},
+  {label:'兼容协议',type:'select',opts:['OpenAI','Anthropic']},
+  {label:'上下文',type:'numpair',labels:['输入','输出'],vals:[262144,131072]}],
+  discover:true,
+  actions:[{label:'测试连接',msg:'连接正常'},{label:'重置',msg:'已重置'},{label:'保存',cls:'primary',msg:'已保存'}]}]},
+{id:'appearance',label:'外观',icon:'sun',group:'个人',desc:'对话框尺寸、思考特效与背景',blocks:[
+ {label:'对话框',type:'rows',rows:[
+  R('slider',{title:'对话框宽度',desc:'输入框与消息列的最大宽度',min:480,max:1000,step:20,val:760,unit:'px'}),
+  R('slider',{title:'对话框高度',desc:'输入框最小高度，内容多时自动长高',min:44,max:200,step:4,val:68,unit:'px'})]},
+ {label:'最高思考强度特效',type:'rows',rows:[
+  R('seg',{title:'动画皮肤',desc:'思考强度拉满时滑条的动画效果',seg:'skin',opts:['Meteor','Forge'],active:0})]},
+ {label:'界面风格',type:'rows',rows:[
+  R('switch',{title:'新外观',desc:'侧栏与面板呈现玻璃质感',on:true})]},
+ {label:'自定义背景图',type:'rows',rows:[
+  R('buttons',{title:'背景图',desc:'位于最底层，不遮挡文字与按钮',slot:'bg',buttons:[{label:'选择图片',cls:'primary',msg:'已选择'},{label:'清除',msg:'已清除'}]})]},
+ {label:'背景效果',type:'rows',rows:[
+  R('slider',{title:'背景模糊值',desc:'0 为不模糊',min:0,max:40,step:1,val:12,unit:'px'}),
+  R('slider',{title:'背景亮度',desc:'调暗背景让前景更清晰',min:20,max:100,step:1,val:80,unit:'%'})]}]},
+{id:'memory',label:'记忆',icon:'brain',group:'扩展',desc:'当前项目的长期记忆',blocks:[
+ {label:'用户记忆',type:'addlist',list:'mem',ph:'新增一条记忆，如：回复风格保持简洁'}]},
+{id:'skills',label:'技能',icon:'bolt',group:'扩展',desc:'项目技能目录与触发词',blocks:[
+ {label:'项目技能',type:'list',list:'skill',note:'对话中 @技能名 或命中触发词自动生效 · .codeforge/skills/&lt;名称&gt;/SKILL.md'}]},
+{id:'builtin',label:'插件',icon:'puzzle',group:'扩展',desc:'进程内增强能力',blocks:[
+ {label:'内置插件',type:'list',list:'plugin',note:'AI 按调用时机自主决定是否使用；关闭后立即生效并持久化'}]},
+{id:'subagents',label:'子智能体',icon:'nodes',group:'扩展',desc:'多智能体协作的开关与能力边界',blocks:[
+ {label:'多智能体协作',type:'rows',rows:[
+  R('switch',{title:'并行委派',tag:'总开关',desc:'主智能体把互不重叠的任务并行交给子智能体；关闭后该能力不可用',on:true})]},
+ {label:'并发上限',type:'rows',rows:[
+  R('slider',{title:'同时运行数',desc:'一次委派最多并行几个子智能体，上限 5 只能调小',min:1,max:5,step:1,val:3,unit:' 个'})]},
+ {label:'能力限制',type:'rows',rows:[
+  R('switch',{title:'允许写入文件',desc:'关闭后子智能体一律只读，改动交由主智能体执行',on:true}),
+  R('switch',{title:'允许删除文件',desc:'关闭后删除动作需主智能体执行',on:false}),
+  R('switch',{title:'允许写入记忆',desc:'关闭后子智能体不能修改项目长期记忆',on:true}),
+  R('note',{title:'固定边界',desc:'探索型子任务始终只读；子智能体永远不能运行命令、加载插件或再次委派'})]}]},
+{id:'mcp',label:'MCP 服务',icon:'hub',group:'扩展',desc:'本地与远程 MCP 服务的注册与管理',tabs:true,blocks:[
+ {label:'已注册服务',tab:'list',type:'list',list:'mcp',note:'stdio / Streamable HTTP / HTTP / WASM 统一在此管理'},
+ {label:'添加服务',tab:'add',type:'form',fields:[
+  {label:'名称',type:'text',ph:'如 filesystem / parallel_search'},
+  {label:'类型',type:'select',opts:['本地（stdio · 命令启动）','远程（Streamable HTTP · URL 端点）']},
+  {label:'启动命令',type:'text',ph:'如 npx / python'},
+  {label:'参数',type:'text',ph:'空格分隔，如 -y @modelcontextprotocol/server-filesystem'},
+  {label:'端点 URL',type:'text',ph:'如 https://search.parallel.ai/mcp'},
+  {label:'环境变量',type:'text',ph:'可选，KEY=VALUE 空格分隔'},
+  {label:'描述',type:'text',ph:'可选'}],
+  actions:[{label:'＋ 新建 MCP 服务器',cls:'primary',msg:'已创建'}]}]},
+{id:'archived',label:'归档',icon:'box',group:'数据',desc:'已归档的会话，满 10 天自动删除',blocks:[
+ {label:'已归档的会话',type:'list',list:'archived'}]}
+];
+var ITEMS={
+ mem:[{text:'回复风格保持简洁',meta:'09-18'},{text:'项目使用 Go 1.27 + 原生 net/http',meta:'09-17'}],
+ skill:[{name:'TRAE-code-review',sub:'对 MR / commit / 分支执行通用代码审查',tag:'代码审查'},{name:'TRAE-debugger',sub:'通过运行时证据定位复杂 Bug',tag:'运行时调试'}],
+ plugin:[{name:'计划模式',sub:'@plan 触发只读规划，输出结构化方案',on:true},{name:'任务清单',sub:'多步任务自动维护待办列表',on:true}],
+ mcp:[{name:'parallel_search',sub:'远程 · Streamable HTTP',on:true},{name:'exa',sub:'远程 · Streamable HTTP',on:false}],
+ archived:[{name:'重构设置界面',sub:'归档 2 天 · 12 条消息'},{name:'修复 Web 工具 SSRF',sub:'归档 8 天 · 34 条消息'}],
+ model:[{name:'GLM-5.3',sub:'z-ai/glm-5.3-free',on:true},{name:'GPT-4o',sub:'gpt-4o',on:false}]
+};
+/* 供应商（示例数据）：供应商管理 + 按供应商分组的模型列表共用 */
+var SUP=[
+ {name:'Z.ai',on:true,base:'https://api.tokenrouter.com/v1',fmt:'Chat Completions (/chat/completions)',key:'sk-••••••••••••••••',models:[
+  {name:'GLM-5.3',id:'z-ai/glm-5.3-free',ctx:'1M',on:true,cur:true},
+  {name:'GLM-4.6',id:'z-ai/glm-4.6',ctx:'200K',on:true,cur:false}]},
+ {name:'OpenAI',on:true,base:'https://api.openai.com/v1',fmt:'Chat Completions (/chat/completions)',key:'sk-••••••••••••••••',models:[
+  {name:'GPT-4o',id:'gpt-4o',ctx:'128K',on:true,cur:false}]},
+ {name:'自定义',on:false,base:'https://api.example.com/v1',fmt:'Chat Completions (/chat/completions)',key:'',models:[]}
+];
+/* ===== 控件渲染 ===== */
+function swHTML(on){return '<label class="sw"><input type="checkbox"'+(on?' checked':'')+' data-fn><i></i></label>';}
+function listHTML(k){
+ var a=ITEMS[k]||[];
+ if(k==='mem')return a.map(function(it){return '<div class="li"><span class="ltext">'+it.text+'</span><span class="lmeta">'+it.meta+'</span><button class="btn sm" data-demo="删除记忆（示例）" data-fn>删除</button></div>';}).join('');
+ if(k==='skill')return a.map(function(it){return '<div class="li"><div class="lm"><div class="ln">'+it.name+'<span class="tag bl">'+it.tag+'</span></div><div class="ls">'+it.sub+'</div></div></div>';}).join('');
+ if(k==='plugin')return a.map(function(it){return '<div class="li"><div class="lm"><div class="ln">'+it.name+'</div><div class="ls">'+it.sub+'</div></div>'+swHTML(it.on)+'</div>';}).join('');
+ if(k==='mcp')return a.map(function(it){return '<div class="li"><div class="lm"><div class="ln"><span class="dot'+(it.on?'':' o')+'"></span>'+it.name+'</div><div class="ls">'+it.sub+'</div></div>'+swHTML(it.on)+'<button class="btn sm dg" data-demo="删除服务（示例）" data-fn>删除</button></div>';}).join('');
+ if(k==='archived')return a.map(function(it){return '<div class="li"><div class="lm"><div class="ln">'+it.name+'</div><div class="ls">'+it.sub+'</div></div><button class="btn sm" data-demo="已恢复会话（示例）" data-fn>恢复</button><button class="btn sm dg" data-demo="已永久删除（示例）" data-fn>删除</button></div>';}).join('');
+ if(k==='model')return a.map(function(it){return '<div class="li"><div class="lm"><div class="ln"><span class="dot'+(it.on?'':' o')+'"></span>'+it.name+(it.on?'<span class="tag ok">使用中</span>':'')+'</div><div class="ls">'+it.sub+'</div></div><button class="btn sm" data-demo="载入编辑（示例）" data-fn>编辑</button><button class="btn sm dg" data-demo="已删除模型（示例）" data-fn>删除</button></div>';}).join('');
+ return '';}
+function ctlHTML(r){
+ switch(r.kind){
+  case 'static':return '<span class="val mono" title="'+r.value+'">'+r.value+'</span>';
+  case 'switch':return swHTML(r.on);
+  case 'slider':return '<div class="sld"><input type="range" min="'+r.min+'" max="'+r.max+'" step="'+r.step+'" value="'+r.val+'" data-fn><span class="v mono">'+r.val+r.unit+'</span></div>';
+  case 'number':return '<label class="mini"><span class="lb">'+r.label+'</span><input class="inp n" type="number" value="'+r.val+'"'+(r.min!==undefined?' min="'+r.min+'"':'')+(r.max!==undefined?' max="'+r.max+'"':'')+' data-fn></label>';
+  case 'select':return '<label class="mini"><span class="lb">'+r.label+'</span><span class="sel" style="width:190px"><select class="inp" data-fn>'+r.opts.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select>'+ic('chev',14)+'</span></label>';
+  case 'seg':return '<div class="seg" data-seg="'+r.seg+'">'+r.opts.map(function(o,i){return '<button data-fn'+(i===r.active?' class="on"':'')+'>'+o+'</button>';}).join('')+'</div>';
+  case 'buttons':return '<div class="bs"><span class="rsp" data-slot="'+r.slot+'"></span>'+r.buttons.map(function(b){return '<button class="btn '+(b.cls||'')+'" data-save="'+r.slot+'|'+b.msg+'" data-fn>'+b.label+'</button>';}).join('')+'</div>';
+  case 'note':return '';
+ }return '';}
+/* 供应商：按供应商分组的模型列表（一键切换当前模型） */
+function supListHTML(){
+ return SUP.map(function(s){
+  return '<div class="sg">'+ic('cube',13)+'<span class="n">'+s.name+'</span><span class="cnt">'+s.models.length+' 个模型</span>'+(s.on?'<span class="tag ok">已启用</span>':'<span class="tag">已禁用</span>')+'</div>'+
+  s.models.map(function(m){
+   return '<div class="li"><div class="lm"><div class="ln">'+(m.cur?'<span class="dot"></span>':'<span class="dot o"></span>')+m.name+(m.cur?'<span class="tag ok">使用中</span>':'')+'</div><div class="ls mono">'+m.id+' · 上下文 '+m.ctx+'</div></div>'+
+   (m.cur?'':'<button class="btn sm primary" data-demo="已设为当前模型（示例）" data-fn>设为当前</button>')+
+   '<button class="btn sm" data-demo="载入编辑（示例）" data-fn>编辑</button>'+
+   '<button class="btn sm dg" data-demo="已删除模型（示例）" data-fn>删除</button></div>';
+  }).join('');
+ }).join('')||'<div class="li"><span class="note">暂无模型</span></div>';}
+/* 供应商管理：左供应商列 / 右详情（配置 + 模型一键切换） */
+function supDetailHTML(s){
+ return '<div class="mdt">'+s.name+(s.on?'':'<span class="tag" style="margin-left:8px">已禁用</span>')+'</div>'+
+ '<div class="rows" style="border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:14px">'+
+  '<div class="rw k-static"><div class="m"><div class="t">Base URL</div></div><span class="val mono">'+s.base+'</span></div>'+
+  '<div class="rw k-static"><div class="m"><div class="t">API 格式</div></div><span class="val">'+s.fmt+'</span></div>'+
+  '<div class="rw k-static"><div class="m"><div class="t">API Key</div></div><span class="val mono">'+(s.key||'未设置')+'</span><button class="btn sm" data-eye="1" data-fn>&#128065;</button></div>'+
+  '<div class="rw k-switch"><div class="m"><div class="t">启用该供应商</div><div class="d">禁用后其下模型不可选用</div></div>'+swHTML(s.on)+'</div>'+
+ '</div>'+
+ '<div class="mdt">模型 · 点击「设为当前」一键切换</div>'+
+ '<div class="list" style="border:1px solid var(--line);border-radius:12px;overflow:hidden">'+
+ (s.models.length?s.models.map(function(m){
+  return '<div class="li"><div class="lm"><div class="ln">'+(m.cur?'<span class="dot"></span>':'<span class="dot o"></span>')+m.name+(m.cur?'<span class="tag ok">使用中</span>':'')+'</div><div class="ls mono">'+m.id+' · 上下文 '+m.ctx+'</div></div>'+swHTML(m.on)+
+  (m.cur?'':'<button class="btn sm primary" data-demo="已设为当前模型（示例）" data-fn>设为当前</button>');
+ }).join(''):'<div class="li"><span class="note">该供应商下暂无模型</span></div>')+'</div>'+
+ '<div class="bs" style="margin-top:14px"><span class="rsp" data-slot="supd"></span><button class="btn" data-demo="连接正常（示例）" data-fn>测试连接</button><button class="btn" data-demo="已添加模型到此供应商（示例）" data-fn>＋ 添加模型到此供应商</button>';}
+function supManageHTML(){
+ var list=SUP.map(function(s,i){
+  return '<button class="mdi'+(i===0?' on':'')+'" data-sup="'+i+'"><span class="dd'+(s.on?'':' o')+'"></span>'+s.name+'<span style="margin-left:auto;font-size:11px;color:var(--dim2)">'+s.models.length+'</span></button>';
+ }).join('')+'<button class="mdi" data-demo="添加供应商（示例）" data-fn><span style="color:var(--accent);font-weight:600">＋</span>添加供应商</button>';
+ return '<div class="md"><div class="mdl">'+list+'</div><div class="mdd" data-supdetail>'+supDetailHTML(SUP[0])+'</div></div>';}
+function rowHTML(r){
+ var head='<div class="m"><div class="t">'+r.title+(r.tag?'<span class="tag">'+r.tag+'</span>':'')+'</div>'+(r.desc?'<div class="d">'+r.desc+'</div>':'')+'</div>';
+ var c=ctlHTML(r);
+ return '<div class="rw k-'+r.kind+'">'+head+(c?'<div class="ctl'+(r.kind==='slider'||r.kind==='buttons'?' grow':'')+'">'+c+'</div>':'')+'</div>';}
+function fieldHTML(f){
+ var h='<span class="lb">'+f.label+'</span>';
+ if(f.type==='text')return '<label class="f">'+h+'<input class="inp" type="text" placeholder="'+f.ph+'" data-fn></label>';
+ if(f.type==='action')return '<label class="f">'+h+'<span class="irow"><input class="inp" type="text" placeholder="'+f.ph+'" data-fn><button class="btn" data-demo="已拉取上游模型列表（示例）" data-fn>'+f.action+'</button></span></label>';
+ if(f.type==='select')return '<label class="f">'+h+'<span class="sel"><select class="inp" data-fn>'+f.opts.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select>'+ic('chev',14)+'</span></label>';
+ if(f.type==='key')return '<div class="f">'+h+'<div class="seg" data-seg="key" style="width:max-content"><button class="on" data-fn>环境变量</button><button data-fn>明文密钥</button></div><div class="kenv"><input class="inp" type="text" placeholder="变量名，如 OPENAI_API_KEY" data-fn></div><div class="irow kplain" hidden><input class="inp" type="password" placeholder="sk-..." data-fn><button class="btn sm" data-eye="1" data-fn>&#128065;</button></div></div>';
+ if(f.type==='numpair')return '<div class="f">'+h+'<div class="np">'+f.labels.map(function(l,i){return '<label>'+l+'<input class="inp" type="number" value="'+f.vals[i]+'" data-fn></label>';}).join('')+'</div></div>';
+ return '';}
+function discHTML(){
+ var ids=['z-ai/glm-5.3-free','gpt-4o-mini','claude-sonnet-4'];
+ return '<div class="pnl"><div class="pnl-h"><span class="pnl-t">上游可用模型<span class="tag bl">'+ids.length+'</span></span><div class="pnl-s"><input class="inp" type="text" placeholder="筛选模型 id…" data-fn><button class="btn sm" data-demo="已收起（示例）" data-fn>收起</button></div></div><div class="pnl-l">'+ids.map(function(id){return '<label class="pi"><input type="checkbox" data-fn><span class="id">'+id+'</span></label>';}).join('')+'</div><div class="pnl-f"><span class="rsp" data-slot="disc"></span><button class="btn sm primary" data-save="disc|已添加选中" data-fn>添加选中</button></div></div>';}
+function blockHTML(b){
+ if(b.type==='supplierlist')return '<div class="grp">'+b.label+'</div><div class="card"><div class="list">'+supListHTML()+'</div></div>';
+ if(b.type==='suppliers')return supManageHTML();
+ if(b.type==='rows'){
+  var rows=b.rows.filter(function(r){return r.kind!=='note';});
+  var notes=b.rows.filter(function(r){return r.kind==='note';});
+  return '<div class="grp">'+b.label+'</div><div class="card"><div class="rows">'+rows.map(rowHTML).join('')+'</div>'+
+   (notes.length?'<div style="padding:10px 16px;border-top:1px solid var(--line2)">'+notes.map(function(n){return '<div class="note">'+n.desc+'</div>';}).join('')+'</div>':'')+'</div>';
+ }
+ if(b.type==='list')return '<div class="grp">'+b.label+'</div><div class="card">'+(b.note?'<div class="note" style="padding:12px 16px 2px">'+b.note+'</div>':'')+'<div class="list">'+listHTML(b.list)+'</div></div>';
+ if(b.type==='addlist')return '<div class="grp">'+b.label+'</div><div class="card"><div class="add"><input class="inp" type="text" placeholder="'+b.ph+'" data-fn><button class="btn primary" data-demo="已添加记忆（示例）" data-fn>添加</button></div><div class="list">'+listHTML(b.list)+'</div></div>';
+ if(b.type==='form')return '<div class="form">'+b.fields.map(fieldHTML).join('')+'</div>'+(b.discover?discHTML():'')+'<div class="foot"><span class="rsp" data-slot="form-'+b.label+'"></span>'+b.actions.map(function(a){return '<button class="btn '+(a.cls||'')+'" data-save="form-'+b.label+'|'+a.msg+'" data-fn>'+a.label+'</button>';}).join('')+'</div>';
+ return '';}
+function blocksHTML(sec){
+ var bs=sec.blocks;
+ if(!sec.tabs)return bs.map(blockHTML).join('');
+ var u=sec.id;
+ var list=bs.filter(function(b){return b.tab==='list';})[0];
+ var sup=bs.filter(function(b){return b.tab==='sup';})[0];
+ var add=bs.filter(function(b){return b.tab==='add';})[0];
+ return '<div class="tb"><button class="on" data-pane="pl-'+u+'" data-fn>'+list.label+'</button>'+
+  (sup?'<button data-pane="ps-'+u+'" data-fn>'+sup.label+'</button>':'')+
+  '<button data-pane="pa-'+u+'" data-fn>'+add.label+'</button></div>'+
+ '<div class="pane on" id="pl-'+u+'">'+blockHTML(list)+'</div>'+
+ (sup?'<div class="pane" id="ps-'+u+'"><div class="grp">'+sup.label+'</div>'+blockHTML(sup)+'</div>':'')+
+ '<div class="pane" id="pa-'+u+'"><div class="grp">'+add.label+'</div><div class="card">'+blockHTML(add)+'</div></div>';}
+function secHead(sec){return '<div class="head"><h1>'+sec.label+'</h1><p>'+sec.desc+'</p></div>';}
+/* ===== 布局 A：分组侧栏 ===== */
+function layoutA(){
+ var g={};
+ SEC.forEach(function(s){(g[s.group]=g[s.group]||[]).push(s);});
+ var nav='<aside class="sA"><button class="ni" data-demo="返回工作区（示例）" data-fn>'+ic('back')+'<span>返回</span></button>'+Object.keys(g).map(function(k){
+  return '<div class="ng">'+k+'</div>'+g[k].map(function(s){
+   return '<button class="ni" data-nav="'+s.id+'">'+ic(s.icon)+'<span>'+s.label+'</span></button>';}).join('');
+ }).join('')+'</aside>';
+ var pages=SEC.map(function(s){
+  return '<section class="pageA" data-page="'+s.id+'" hidden>'+secHead(s)+'<div style="margin-top:20px">'+blocksHTML(s)+'</div></section>';}).join('');
+ return '<div class="lA">'+nav+'<main class="mA"><div class="w">'+pages+'</div></main></div>';
+}
+/* ===== 布局 B：主从双栏 ===== */
+function layoutB(){
+ var g={};
+ SEC.forEach(function(s){(g[s.group]=g[s.group]||[]).push(s);});
+ var nav='<aside class="sB"><button class="ni" data-demo="返回工作区（示例）" data-fn>'+ic('back')+'<span>返回</span></button>'+Object.keys(g).map(function(k){
+  return '<div class="ng">'+k+'</div>'+g[k].map(function(s){return '<button class="ni" data-nav="'+s.id+'">'+ic(s.icon)+'<span>'+s.label+'</span></button>';}).join('');
+ }).join('')+'</aside>';
+ function detailInner(sec){
+  if(sec.tabs)return blocksHTML(sec);
+  var parts=[];
+  sec.blocks.forEach(function(b){
+   if(b.type==='rows')parts.push('<div class="mdt">'+b.label+'</div><div class="card"><div class="rows">'+b.rows.filter(function(r){return r.kind!=='note';}).map(function(r){return rowHTML(r);}).join('')+'</div>'+(b.rows.some(function(r){return r.kind==='note';})?'<div style="padding:10px 16px;border-top:1px solid var(--line2)">'+b.rows.filter(function(r){return r.kind==='note';}).map(function(n){return '<div class="note">'+n.desc+'</div>';}).join('')+'</div>':'')+'</div>');
+   else if(b.type==='addlist')parts.push('<div class="mdt">'+b.label+'</div><div class="add" style="padding:12px 2px"><input class="inp" type="text" placeholder="'+b.ph+'" data-fn><button class="btn primary sm" data-demo="已添加记忆（示例）" data-fn>添加</button></div><div class="list">'+listHTML(b.list)+'</div>');
+   else if(b.type==='list')parts.push('<div class="mdt">'+b.label+'</div>'+(b.note?'<div class="note" style="margin-bottom:6px">'+b.note+'</div>':'')+'<div class="list">'+listHTML(b.list)+'</div>');
+  });
+  return parts.join('');
+ }
+ var pages=SEC.map(function(s){
+  var inner=detailInner(s);
+  var entries;
+  if(s.tabs){
+   entries=s.blocks.map(function(b,i){return '<button class="mdi'+(i===0?' on':'')+'" data-demo="查看「'+b.label+'」（示例）" data-fn><span class="dd"></span>'+b.label+'</button>';}).join('');
+  }else{
+   entries='<button class="mdi on" data-nav="'+s.id+'"><span class="dd"></span>'+s.label+'</button>';
+  }
+  return '<section class="pageB" data-page="'+s.id+'" hidden><div class="head" style="margin-bottom:16px"><h1>'+s.label+'</h1><p>'+s.desc+'</p></div><div class="md"><div class="mdl">'+entries+'</div><div class="mdd">'+inner+'</div></div></section>';}).join('');
+ return '<div class="lB">'+nav+'<main class="mB"><div class="bB">'+pages+'</div></main></div>';
+}
+/* ===== 布局 C：顶部标签 ===== */
+function layoutC(){
+ var tabs=SEC.map(function(s,i){return '<button class="'+(i===0?'on':'')+'" data-nav="'+s.id+'">'+s.label+'</button>';}).join('');
+ var panes=SEC.map(function(s,i){
+  var body=blocksHTML(s);
+  return '<section class="pageC" data-page="'+s.id+'" '+(i===0?'':'hidden')+'>'+body+'</section>';}).join('');
+ return '<div class="lC"><div class="tC"><button class="ni" style="width:auto" data-demo="返回工作区（示例）" data-fn>'+ic('back')+'<span>返回</span></button><div class="tt">'+tabs+'</div></div><main class="bC">'+panes+'</main></div>';
+}
+/* ===== 布局 D：图标窄栏 ===== */
+function layoutD(){
+ var rail='<aside class="rD"><button class="rb" style="width:44px;height:32px" data-demo="返回工作区（示例）" data-fn title="返回">'+ic('back')+'</button>'+
+  SEC.map(function(s,i){return '<button class="rb'+(i===0?' on':'')+'" data-nav="'+s.id+'" title="'+s.label+'">'+ic(s.icon,17)+'</button>';}).join('')+'</aside>';
+ var pages=SEC.map(function(s,i){
+  return '<section class="pageD" data-page="'+s.id+'" '+(i===0?'':'hidden')+'>'+secHead(s)+'<div style="margin-top:20px">'+blocksHTML(s)+'</div></section>';}).join('');
+ return '<div class="lD">'+rail+'<main class="mD"><div class="w">'+pages+'</div></main></div>';
+}
+/* ===== 布局 E：单页画布 ===== */
+function layoutE(){
+ var toc='<aside class="tocw"><div class="tl">设置目录</div>'+SEC.map(function(s,i){return '<button class="ti'+(i===0?' on':'')+'" data-anchor="'+s.id+'">'+ic(s.icon,13)+' '+s.label+'</button>';}).join('')+'</aside>';
+ var secs=SEC.map(function(s){return '<div class="sec" id="sec-'+s.id+'"><h2>'+s.label+'</h2><p class="d" style="margin:4px 0 18px">'+s.desc+'</p>'+blocksHTML(s)+'</div>';}).join('');
+ return '<div class="lE"><main class="me" id="me"><div class="tp"><button class="ni" style="width:auto" data-demo="返回工作区（示例）" data-fn>'+ic('back')+'<span>返回</span></button><b style="font-size:15px">设置</b></div><div class="w">'+secs+'</div></main>'+toc+'</div>';
+}
+/* ===== 装配与事件 ===== */
+var stage=document.getElementById('stage');
+var LAYOUTS={a:layoutA,b:layoutB,c:layoutC,d:layoutD,e:layoutE};
+var state={layout:'a'};
+function mount(key){
+ state.layout=key;
+ stage.innerHTML=LAYOUTS[key]();
+ var firstNav=stage.querySelector('[data-nav]');
+ if(firstNav)activate(firstNav.dataset.nav);
+ var firstRb=stage.querySelector('.rb[data-nav]');
+ if(firstRb)firstRb.classList.add('on');
+ wire();
+}
+function activate(id){
+ stage.querySelectorAll('.pageA,.pageB,.pageC,.pageD').forEach(function(p){p.hidden=p.dataset.page!==id;});
+ stage.querySelectorAll('.ni[data-nav]').forEach(function(n){n.classList.toggle('on',n.dataset.nav===id);});
+ if(state.layout==='d'){
+  stage.querySelectorAll('.rb[data-nav]').forEach(function(n){n.classList.toggle('on',n.dataset.nav===id);});
+ }
+ if(state.layout==='e'){
+  stage.querySelectorAll('.ti').forEach(function(t){t.classList.toggle('on',t.dataset.anchor===id);});
+ }
+}
+var toastEl=document.getElementById('toast'),toastT;
+function toast(msg){toastEl.textContent=msg;toastEl.classList.add('on');clearTimeout(toastT);toastT=setTimeout(function(){toastEl.classList.remove('on');},1400);}
+function wire(){
+ stage.querySelectorAll('[data-nav]').forEach(function(n){
+  n.addEventListener('click',function(){
+   var id=n.dataset.nav;
+   activate(id);
+   if(state.layout==='e'){
+    var sec=document.getElementById('sec-'+id);
+    var me=document.getElementById('me');
+    if(sec&&me)me.scrollTop=sec.offsetTop-me.querySelector('.tp').offsetHeight;
+   }
+  });
+ });
+ stage.querySelectorAll('[data-anchor]').forEach(function(t){
+  t.addEventListener('click',function(){
+   var sec=document.getElementById('sec-'+t.dataset.anchor);
+   var me=document.getElementById('me');
+   if(sec&&me)me.scrollTop=sec.offsetTop-me.querySelector('.tp').offsetHeight;
+   activate(t.dataset.anchor);
+  });
+ });
+ stage.querySelectorAll('input[type=range]').forEach(function(r){
+  var out=r.parentElement.querySelector('.v');
+  r.addEventListener('input',function(){out.textContent=r.value+(out.textContent.replace(/-?\d+/,'').trim()==='%'?'%':out.textContent.replace(/-?\d+/,''));});
+ });
+ stage.querySelectorAll('[data-eye]').forEach(function(b){
+  b.addEventListener('click',function(){var i=b.parentElement.querySelector('input');if(!i){toast('已切换显示（示例）');return;}i.type=i.type==='password'?'text':'password';});
+ });
+ stage.querySelectorAll('[data-demo]').forEach(function(b){
+  b.addEventListener('click',function(){toast(b.dataset.demo);});
+ });
+ stage.querySelectorAll('[data-save]').forEach(function(b){
+  b.addEventListener('click',function(){
+   var p=b.dataset.save.split('|'),slot=p[0],msg=p[1];
+   var out=stage.querySelector('[data-slot="'+slot+'"]');
+   if(out){out.textContent=msg;out.classList.remove('e');setTimeout(function(){out.textContent='';},1600);}
+   toast(msg);
+  });
+ });
+ stage.querySelectorAll('.seg').forEach(function(seg){
+  seg.querySelectorAll('button').forEach(function(b){
+   b.addEventListener('click',function(){
+    seg.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on');
+   });
+  });
+ });
+ stage.querySelectorAll('[data-pane]').forEach(function(b){
+  b.addEventListener('click',function(){
+   var id=b.dataset.pane;
+   var pane=document.getElementById(id);
+   if(!pane)return;
+   pane.classList.add('on');
+   var sib=pane.parentElement.querySelectorAll(':scope>.pane');
+   sib.forEach(function(p){p.classList.toggle('on',p===pane);});
+   b.parentElement.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b);});
+  });
+ });
+ /* 供应商管理：切换左侧供应商，重绘右侧详情 */
+ stage.querySelectorAll('[data-sup]').forEach(function(b){
+  b.addEventListener('click',function(){
+   stage.querySelectorAll('[data-sup]').forEach(function(x){x.classList.toggle('on',x===b);});
+   var d=stage.querySelector('[data-supdetail]');
+   if(d)d.innerHTML=supDetailHTML(SUP[+b.dataset.sup]);
+  });
+ });
+ stage.querySelectorAll('[data-seg="key"] button').forEach(function(b){
+  b.addEventListener('click',function(){
+   var f=b.closest('.f');
+   var env=f.querySelector('.kenv'),plain=f.querySelector('.kplain');
+   var useEnv=b.textContent==='环境变量';
+   if(env)env.hidden=!useEnv;
+   if(plain)plain.hidden=useEnv;
+  });
+ });
+}
+/* 统计功能点：控件 + 操作按钮（5 套布局同源同数） */
+function countFns(){
+ var n=0;
+ SEC.forEach(function(s){
+  s.blocks.forEach(function(b){
+   if(b.type==='rows')b.rows.forEach(function(r){
+    if(r.kind==='static'||r.kind==='switch'||r.kind==='slider'||r.kind==='number'||r.kind==='select'||r.kind==='seg')n++;
+    if(r.kind==='buttons')n+=r.buttons.length;
+    if(r.kind==='note')n++;
+   });
+   if(b.type==='supplierlist'){SUP.forEach(function(sp){n+=sp.models.length;});n+=SUP.length;}
+   if(b.type==='suppliers'){SUP.forEach(function(sp){n+=sp.models.length+4;});}
+   if(b.type==='list')n+=(ITEMS[b.list]||[]).length+1;
+   if(b.type==='addlist')n+=(ITEMS[b.list]||[]).length+1;
+   if(b.type==='form'){n+=b.fields.length;n+=b.actions.length;if(b.discover)n+=1;}
+  });
+ });
+ return n;
+}
+document.getElementById('chk').textContent='功能点 '+countFns()+' · 与原界面一致';
+document.getElementById('tabs').addEventListener('click',function(e){
+ var b=e.target.closest('.sb-tab');if(!b)return;
+ document.querySelectorAll('.sb-tab').forEach(function(x){x.classList.toggle('on',x===b);});
+ mount(b.dataset.l);
+});
+mount('a');
+})();
+</script>
+</body>
+</html>
