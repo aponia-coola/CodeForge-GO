@@ -314,7 +314,7 @@ func TestSubagentOutOfScopeStillDisclosed(t *testing.T) {
 }
 
 // TestApprovalReasonNeverLeaksToolID reason 会进审批弹窗的悬停提示，
-// 绝不能出现内部工具代号（docs/hitl-approval-phrases.md 明确列为要避免的）。
+// 绝不能出现内部工具代号（docs/结论.md §2.4 明确列为要避免的）。
 func TestApprovalReasonNeverLeaksToolID(t *testing.T) {
 	ids := []string{"write_file", "edit_file", "delete_file", "run_command",
 		"read_file", "list_dir", "search_files", "web_fetch", "web_search"}

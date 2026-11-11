@@ -187,7 +187,7 @@ func (p *Policy) Evaluate(toolName, action, payload string, readOnly bool) (Deci
 				// ⚠️ 这里**刻意不带工具代号**（早先返回 "命中规则：" + toolName，
 				// 悬停提示里就出现了「命中规则：write_file」）。
 				// 项目自己的纪律是「工具代号是给系统调用的内部名称，界面显示的是中文」
-				// （见 agent/prompt.go 与 docs/hitl-approval-phrases.md）。
+				// （见 agent/prompt.go 与 docs/结论.md §2.4）。
 				// 排查不受影响：AuditEntry 本来就单独记 Tool 字段。
 				return r.Decision, "命中安全规则（该操作需要人工确认）"
 			}
