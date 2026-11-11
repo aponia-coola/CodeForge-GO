@@ -1,579 +1,150 @@
 # CodeForge-Go
 
-[English](README_EN.md) | [简体中文](README.md)
+**在浏览器里和 AI 编码智能体对话。它在你的项目目录里读写文件、跑命令、调模型。**
 
-Go 编写的跨平台 Web Agent。在浏览器里对话，Agent 在你的项目目录里读写文件、跑命令、调模型。
+单文件静态二进制 · 零运行时依赖 · 25~36 MB 常驻 · Windows / Linux / Android Termux
 
-单文件静态二进制，零运行时依赖，Windows / Linux / Android Termux 通用。
+[English](README_EN.md) | [中文详细版](README_ZH.md)
 
-**界面就是一个网页** —— 这不只是形态选择，它让同一份程序能跑在**没有图形界面的服务器**上：SSH 进去启动，用手机或笔记本的浏览器打开就能用；在 Android Termux 上也是同一套，没有任何桌面环境依赖。
+<!-- SCREENSHOT:PC -->
+> **截图占位** —— 桌面端主界面（`test/cf-screenshot-chat.png`）
 
-PC
-![界面](test/cf-screenshot-chat.png)
-安卓 WebView
-![界面](test/phone.png)
+<!-- SCREENSHOT:MOBILE -->
+> **截图占位** —— Android Termux WebView（`test/phone.png`）
+
+<!-- GIF:APPROVAL -->
+> **动图占位** —— 人工审批：策略判定 `Ask` 时操作挂起，等你决定
+
+<!-- GIF:DIFF -->
+> **动图占位** —— diff 预览：文件改动绿增红减，点击跳转改动位置
+
+<!-- GIF:MOBILE -->
+> **动图占位** —— 移动端：窄屏侧栏变抽屉，设置页改横向滚动
 
 ---
 
-## 特性
+## 功能
 
-### 浏览器 UI = 无 GUI 环境可用
+### 对话与执行
 
-界面是一个网页，不依赖 X11/Wayland/桌面环境。同一份二进制在这些场景下都能用：
+- **浏览器即界面** —— 同一份二进制跑在桌面、无 GUI 服务器、安卓手机上，不需要图形环境
+- **16 个内置工具** —— 文件读写改删、目录列举、搜索、`run_command`、任务清单、记忆、技能创建、网页抓取与搜索、子智能体委派、目标校验、工具结果回读
+- **断点续跑** —— 打断后保留未完成轮次，可重试、编辑重发、连带回滚文件
+- **运行中插话** —— 任务执行中途追加指令，在步骤边界并入当前轮
 
-| 场景 | 怎么用 |
-|---|---|
-| **无 GUI 服务器** | SSH 上去启动，`-no-open` 免得尝试拉浏览器；用本地浏览器访问 `http://<服务器地址>:8420` |
-| **Android Termux** | 手机上直接跑，浏览器开 `http://127.0.0.1:8420` |
-| **容器 / NAS / 树莓派** | 同服务器，暴露端口即可 |
-| **Windows / 桌面 Linux** | 启动后自动打开浏览器 |
+### 多模型接入
 
-没有 Electron、没有前端构建步骤、没有 npm 依赖 —— `web/dist/` 里的文件是手写源码，`go:embed` 直接打进二进制。**整个界面跟着二进制走，部署只需要拷贝一个文件。**
-
-默认只监听 `127.0.0.1`（本机回环），不对外暴露。需要从别的机器访问时改 `config/default.yaml`：
-
-```yaml
-server:
-  host: "0.0.0.0"   # 监听所有网卡
-  port: 8420
-```
-
-> ⚠️ 改成 `0.0.0.0` 等于把 Agent 的读写权限暴露到网络上。服务自带访问令牌做防护，但**务必只在你信任的网络里这么做**，且不要直接暴露到公网。
-
-会话列表、模型管理、设置、审批卡片、diff 预览都在同一个界面里。
-
-### 专为 Termux 与低配环境做的适配
-
-不是「顺便能跑」，是有专门处理：
-
-- **shell 探测**：Termux 上优先用 `$PREFIX/bin/bash`（Android 没有 `/bin/bash`），回退 `/bin/sh`。
-- **存储授权**：主动跑 `termux-setup-storage` 申请权限，授权后 `~/storage/shared` 软链可用。
-- **目录选择器**：没有原生文件夹对话框时用内置浏览器式选择器，起始目录挂在 `~`（一定列得出来，不像 `/storage/shared` 未授权时是空的）。
-- **进程组管理**：Android 的进程终止行为与桌面 Linux 不同，单独适配。
-- **内存软上限**：`GOMEMLIMIT` 按物理内存 25% 设定 —— 手机上给的内存配额通常远小于桌面，靠这个防止被系统 OOM killer 杀掉。
-
-### 低内存占用
-
-启动后常驻约 25 MB（Windows amd64 空载实测 Working Set）。几个关键设计：
-
-- **软内存上限**：`GOMEMLIMIT` 按物理内存的 25% 自动设定，夹逼在 256 MiB ~ 2 GiB。超限时 Go GC 更积极，而不是等系统 OOM。
-  可用 `CODEFORGE_GOMEMLIMIT` 覆盖（支持 `2GiB` / `512MiB` / 纯字节三种写法，`0` 表示关闭）。容器里读的是**物理内存而非 cgroup 配额**，会偏大，那种场景靠这个覆盖。
-- **上下文主动压缩**：每轮请求前检查 token 占用，超预算先压缩历史再发送。
-- **工具结果限幅**：大结果由工具分页，Executor 只做兜底截断，且截断产出仍是合法 JSON。
-- **撤销栈有字节预算**：单条超限落盘、总量有上限、丢弃时明确告知。
+- **多供应商** —— OpenAI 兼容协议 + Anthropic 协议
+- **模型库与供应商库** —— 界面上管理模型条目与连接信息，支持多模型并存
+- **多模态** —— 图片与视频透传，能力三态声明（未知 / 支持 / 不支持），上游拒收时自动回滚历史
+- **上下文窗口探测** —— 自动实测上游真正接受的上下文上限（1M 逐档降到 8K），不靠模型库手填
+- **限流** —— 客户端 RPM 预约式滑动窗口（发请求前错开，从不撞墙）+ 上游 429 独立退避
+- **思考强度** —— 按上游分级动态构建思考参数
 
 ### 多会话并发
 
-同一个项目里可以同时跑多个会话，互不干扰：
+- **每会话独立** —— 独立的运行槽、撤销栈、阅读登记，互不干扰
+- **会话切换稳定** —— 切换会话自动跟随其绑定的工作区
+- **项目分组** —— 侧栏按工作区分组展示全部会话
 
-- **运行表按会话分槽**：每个会话各有自己的取消句柄，发消息和打断只作用于本会话。
-- **撤销栈按会话分桶**：A 的撤销撤不到 B 的写入，A 的大文件不会挤掉 B 的快照。
-- **阅读登记按会话隔离**：A 读过的文件不会让 B 获得「凭记忆改写」的资格。
-- **运行中转向只对当前会话生效**：不会被「恰好有个后台任务在跑」改道到别的会话。
-- **不跨会话打断**：在 B 按打断不会停掉后台正在跑的 A。
+### 子智能体
 
-> **当前的边界**：并发在**同一工作区内**完全成立。跨工作区并发还不支持 ——
-> 工作区是进程级的，切它会改掉正在跑的那些会话所看到的工作区，所以有任务在跑时
-> 跨项目切换会被挡并给出提示。把工作区下沉到每个会话是进行中的工作。
+- **并行委派** —— `delegate_subagents` 把任务拆给多个子智能体同时处理，进度实时回传
+- **权限收窄** —— 可分别禁用写入、删除、记忆，能力上限三处同步（Agent / 调度器 / 工具 schema）
+- **围栏独立且不可穿透** —— 子智能体的越界检查独立生效，人工审批也穿透不了
+- **用量归并** —— 子智能体的 token 计入父会话
 
-### 跨平台静态编译
+### 目标模式
 
-`CGO_ENABLED=0`，产物导入表为空 —— 干净机器上直接跑，不需要装任何运行库。
+- **强制校验** —— 完成前必须通过 `goal_verify`，不通过就继续做，不会静默放过
 
-| 平台 | 产物 | 大小 |
-|---|---|---|
-| Windows amd64 | `codeforge.exe` | 16.3 MB |
-| Linux amd64 | `codeforge` | 15.9 MB |
-| Android arm64（Termux） | `codeforge` | 16.4 MB |
+### 文件安全
 
-### 内置工具
+- **工作区围栏** —— 路径必须落在工作区内，区内的软链指向区外会被逐级向上解析挡住
+- **先读后写** —— 没读过的文件不允许凭记忆改写；读取后若被外部改动，指纹比对会发现并拒绝
+- **CAS 写入** —— 「读当前 → 比对指纹 → 写」在同一把按路径的锁内完成，并发写不会静默互相覆盖
+- **原子落盘** —— 同目录临时文件 + rename，进程写一半被杀不会留半截文件
+- **原子级撤销** —— 写前快照，按会话分桶，可逐字节还原
+- **检查点回滚** —— 按 (会话, 步骤, 路径) 精确回滚到任一步之前
 
-文件：`read_file` `write_file` `edit_file` `delete_file` `list_dir` `search_files` `find_files`
-命令：`run_command`
-协作：`delegate_subagents`（多智能体） `goal_verify`（目标模式强约束校验）
-其它：`todo_write` `save_memory` `create_skill` `web_fetch` `web_search`
+### 审批与策略
 
-### 文件操作的安全约束
+- **三级策略** —— Allow / Ask / Deny，可运行期热切换
+- **人工审批（HITL）** —— 命中 `Ask` 的操作挂起等决定，审批超时独立于工具执行超时
+- **危险命令黑名单** —— `rm -rf /` 一类直接拒绝，优先级最高，规则表改不动
+- **全量审计** —— 每次工具调用写审计日志（JSONL，超 1 MiB 轮转，保留 3 份）
+- **能力可见面** —— 可隐藏部分工具不发给模型；隐藏与禁止刻意分离
 
-这几条是硬性的，改不动：
+### 上下文
 
-- **先读后写**：没读过的文件不允许凭记忆改写。读取之后若被外部改动，指纹比对会发现并拒绝。
-- **CAS 写入**：「读当前 → 比对 → 写」在同一把按路径的锁内完成，并发写不会静默互相覆盖。
-- **原子落盘**：同目录临时文件 + rename。进程写一半被杀不会留半截文件。
-- **工作区围栏**：路径必须落在工作区内。「区内软链指向区外、且目标尚不存在」这类绕过会被逐级向上解析挡住。
-- **原子级撤销**：写前快照，按会话分桶，可逐字节还原。
+- **在线校准** —— 无 tokenizer 依赖，用上游返回的真实 usage 反推估算系数（只放大不缩小，宁可早压）
+- **压缩状态落盘** —— 摘要游标与校准系数持久化，重启后复用，不重复踩「第一次就炸上下文」
+- **压缩永不丢历史** —— 完整对话始终保留，压缩只改送模视图
+- **大结果外置** —— 工具输出超 8 KiB 落盘留引用（上下文里留 2 KiB 预览），模型用 `tool_result_read` 分段取回
+- **占用可视化** —— 底部栏进度条实时显示占用，可手动触发压缩
 
-### 人工审批（HITL）
+### 界面
 
-策略判定为 `Ask` 的操作会挂起，在界面上等你的决定。审批有独立超时（默认 15 分钟），与工具执行超时分开 —— 「用户拒绝」和「没人管」在界面上的说法不同。
+- **手写单文件前端** —— 无 npm、无构建步骤，`go:embed` 打进二进制
+- **深浅色主题 + 自定义背景图** —— 背景图、模糊度、亮度可调
+- **液态玻璃开关** —— 设置页可开
+- **移动端适配** —— 窄屏侧栏变抽屉、设置页改横向滚动、用 `visualViewport` 实测可见高度
+- **内置选择器** —— 无原生对话框时（安卓 Termux）用浏览器式目录选择器
 
-### 其它
+### 扩展
 
-- **断点续跑**：任务被打断后保留未完成轮次，可从断点重试或编辑重发。
-- **系统通知**：任务完成时按需发系统通知，带可见性判断与节流。
-- **子智能体**：把任务派给多个子智能体并行处理，进度实时回传。
-- **目标模式**：完成前必须通过 `goal_verify` 校验，不通过就继续。
-- **插件机制**：MCP / 远程能力可适配成标准工具接入。
+- **MCP 插件** —— stdio / HTTP / SSE 三种传输，适配成标准工具接入
+- **WASM 插件** —— 用 wazero 跑 WASM 插件
+- **技能系统** —— `<workspace>/.codeforge/skills/<name>/SKILL.md`，带 frontmatter
+
+### 部署
+
+- **单文件静态二进制** —— `CGO_ENABLED=0`，产物 16 MB，拷贝一个文件就是完整部署
+- **三平台交叉编译** —— Windows x64 / Linux amd64 / Android Termux arm64
+- **零运行时依赖** —— 4 个直接依赖：WebSocket · WASM · YAML · 系统调用封装
+- **纯 Go SQLite** —— `modernc.org/sqlite`，不需要 C 编译器，所以静态编译不受阻
+- **访问令牌** —— 监听非回环地址时生成随机令牌，经 HttpOnly Cookie 下发，API 与 WebSocket 都校验
+
+---
+
+## 工程规模
+
+| | |
+|---|---|
+| Go 代码 | 27.5k 行生产代码 + 29.3k 行测试，13 个包 |
+| 测试 | 138 个测试文件，核心包覆盖率 76%~87% |
+| 直接依赖 | 4 个（`gorilla/websocket` · `wazero` · `yaml.v3` · `golang.org/x/sys`） |
+| 前端 | 手写单文件 JS，零构建步骤 |
 
 ---
 
 ## 快速开始
 
-### 1. 构建
+```bash
+git clone https://github.com/raine-x/CodeForge-GO.git
+cd CodeForge-GO
+
+export CODEFORGE_API_KEY=sk-xxx      # 只从环境变量读，程序不读密钥文件
+go build -o bin/codeforge ./cmd/agent
+./bin/codeforge -no-open
+```
+
+浏览器打开 `http://127.0.0.1:8420`，选择工作区，开始对话。
+
+交叉编译三平台：
 
 ```bash
-# 本机（Windows 产物是 bin/codeforge.exe —— go build -o bin/codeforge 不会自动补
-# .exe，请显式写全后缀，否则会与 Makefile / cf.cmd 用的文件名不一致）
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/codeforge.exe ./cmd/agent
-
-# 交叉编译三件
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/codeforge-windows-amd64.exe ./cmd/agent
-CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/codeforge-linux-amd64      ./cmd/agent
-CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o bin/codeforge-android-arm64  ./cmd/agent
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -trimpath -ldflags "-s -w" -o bin/codeforge-windows-amd64.exe ./cmd/agent
+CGO_ENABLED=0 GOOS=linux   GOARCH=amd64   go build -trimpath -ldflags "-s -w" -o bin/codeforge-linux-amd64 ./cmd/agent
+CGO_ENABLED=0 GOOS=android GOARCH=arm64   go build -trimpath -ldflags "-s -w" -o bin/codeforge-android-arm64 ./cmd/agent
 ```
 
-或用 Makefile：`make build` / `make all-platforms`（本机构建会自动带正确后缀）。
-
-### 2. 配置 API Key
-
-**密钥只从系统环境变量读**，不读任何密钥文件。这样密钥不会躺在项目目录里被同步盘、备份脚本随手带走。
-
-**Linux / macOS / Termux**（写进 shell 配置持久生效）：
-
-```bash
-echo 'export CODEFORGE_API_KEY=sk-...' >> ~/.bashrc
-source ~/.bashrc
-```
-
-**Windows**（`setx` 对新终端生效）：
-
-```powershell
-setx CODEFORGE_API_KEY "sk-..."
-```
-
-### 配置文件里引用环境变量
-
-不想每次都 export？**在 YAML 里写 `${变量名}`**，值在加载时从环境取：
-
-```yaml
-# config/providers.yaml
-providers:
-  - id: my-gateway
-    name: 某网关
-    base_url: ${GATEWAY_URL}/v1     # ← 变量引用，文件里没有地址
-    protocol: openai
-    key_source: plain
-    key_value: ${GATEWAY_KEY}       # ← 变量引用，文件里没有密钥
-```
-
-`config/models.yaml` 与 `config/local.yaml` 同样支持：
-
-```yaml
-# config/local.yaml
-llm:
-  api_key: ${MY_KEY}
-  base_url: ${MY_BASE_URL}
-  model: gpt-4o
-```
-
-**支持 `${NAME}` 与 `$NAME` 两种写法**；`\${NAME}` 取字面量。展开只发生在内存里，**不会改写文件**。
-
-**变量没设时怎么办**：按空处理，并在启动日志里点名：
-
-```
-WARN  供应商库 config/providers.yaml 引用了未设置的环境变量：GATEWAY_KEY（这些值已按空处理；…）
-```
-
-这样配了十项错一项时，其余九项照样能用；而且日志会直接告诉你少了哪个变量 —— 否则症状是「明明配了却连不上」，错误信息指向 401，完全看不出是变量没设。
-
-### 变量名优先级
-
-若没在 YAML 里写 `${...}`，程序按 `config/config.go` 的 `applyEnvFallback` 依次尝试：
-
-| 变量名 | 说明 |
-|---|---|
-| `CODEFORGE_API_KEY` | **推荐**，所有 provider 通用，优先级最高 |
-| `ANTHROPIC_API_KEY` | `provider: anthropic` 时的次选 |
-| `OPENAI_API_KEY` | `provider: openai` / `custom` 时的次选 |
-| `LLM_API_KEY` | 最后一档兜底（旧代码的默认名） |
-
-> 如果 `config/local.yaml` 里显式写了 `llm.api_key`（含 `${…}` 展开后的值），**它优先于上面这条链**。
-
-**非敏感配置**（模型名、协议等）直接在 YAML 里写，或用界面上的「设置」页改 —— 那会写进 `config/models.yaml` 与 `config/providers.yaml`（两个文件都在 `.gitignore` 里）。
-
-### 3. 启动
-
-```bash
-# 方式一：启动器（内部自动切到项目根目录，与当前目录无关）
-./cf.cmd                    # Windows
-./cf-termux.sh              # Android Termux
-
-# 方式二：直接运行 —— 两个路径都给绝对值，从哪启动都一样
-./bin/codeforge -config /path/to/project/config -workdir /path/to/project
-./bin/codeforge.exe -config "C:\path\to\project\config" -workdir "C:\path\to\project"
-
-# 方式三：Makefile（构建 + 启动，会自动切目录）
-make run
-```
-
-启动后浏览器会自动打开 <http://127.0.0.1:8420>。
-
-**无 GUI 环境下务必加 `-no-open`** —— 否则程序会尝试调用 `xdg-open` / 浏览器并失败（多数情况下只是报错，不影响服务，但日志里会有噪音）：
-
-```bash
-# 无 GUI 服务器
-./bin/codeforge -no-open -config /srv/myproject/config -workdir /srv/myproject
-```
-
-然后在本地浏览器访问 `http://<服务器地址>:8420`。
-
-### 4. 选择工作区
-
-界面右上角点「选择工作区」，或用参数直接指定：
-
-```bash
-./bin/codeforge -workdir /path/to/project
-```
-
-**工作区必须是绝对路径** —— 相对路径没有意义（工作区没法相对自己），放任相对路径会被按进程当前目录解析，换个启动方式工作区就变了。
-
-目录不存在时会按「未选择工作区」处理，不会静默设成工作目录。
-
-### 5. 开始对话
-
-在工作区已选中的前提下，直接在输入框里说话。
-
-- **运行中想换方向**：直接打字发送，指令会在下一个步骤边界并入当前任务（只对当前会话生效）。
-- **运行中想停**：输入框清空，按 `Esc` 或点发送按钮。
-- **切换会话**：点侧栏的会话卡片。同一项目里的会话可以并行跑。
-
----
-
-## 命令行参数
-
-```
-codeforge [start]  [-config 目录] [-workdir 目录] [-no-open]   启动服务（默认）
-codeforge stop     [-config 目录]                              停止运行中的服务
-codeforge restart  [-config 目录] [-workdir 目录] [-no-open]   重启服务
-```
-
-| 参数 | 说明 |
-|---|---|
-| `-config 目录` | 配置目录，默认 `config` |
-| `-workdir 目录` | Agent 工作目录（必须绝对路径），默认当前目录 |
-| `-no-open` | 不自动打开浏览器 |
-| `-continue` | 启动后回到该工作区最近更新的那条会话 |
-| `-resume <ID>` | 启动后回到指定会话：会话 ID / ID 前缀 / 会话标题 / `last` |
-
-`-resume` 指定的会话若属于别的工作区，会先切工作区再载入 —— 在一个项目里回放另一个项目的对话，模型下一步改的就是错项目的文件。
-
----
-
-## 各平台启动
-
-### 三条通用规则
-
-1. **`-config` 与 `-workdir` 都给绝对路径**。给绝对值之后从哪个目录启动都一样，不必切 CWD（用启动器或 `make run` 则是自动帮你切）。
-2. **工作区必须是绝对路径** —— 相对路径没有意义（工作区没法相对自己），放任它会被按进程当前目录解析，换个启动方式工作区就变了。
-3. **配置的工作区不存在或不是目录**，按未选择工作区处理，不会静默设成工作目录。
-
-另外：**没有图形环境时加 `-no-open`**（Termux、无 GUI 服务器、容器内都需要）。
-
-### 无 GUI 服务器（Linux / BSD / 容器 / NAS）
-
-这是这个程序被设计成网页界面的主要理由。
-
-```bash
-# 上传到服务器
-scp bin/codeforge-linux-amd64 user@server:/usr/local/bin/codeforge
-
-# 启动（-no-open 免得它尝试拉浏览器；两个路径都给绝对值，从哪启动都一样）
-./codeforge -no-open -config /srv/myproject/config -workdir /srv/myproject
-```
-
-`-config` 与 `-workdir` 都给绝对路径，从哪个目录启动都一样。密钥走系统环境变量（`CODEFORGE_API_KEY`），在本地 shell 里 `export` 即可。
-
-然后：
-
-1. 默认只监听 `127.0.0.1`，此时只有服务器本机能访问 —— 用 SSH 端口转发最省事，不用改配置：
-
-   ```bash
-   # 在你自己的机器上执行
-   ssh -L 8420:127.0.0.1:8420 user@server
-   ```
-
-   然后浏览器开 <http://127.0.0.1:8420>。
-
-2. 需要从别的机器直接访问时，把 `config/default.yaml` 的 `server.host` 改成 `0.0.0.0`，
-   并确认防火墙放行 8420 端口。服务启动时会生成随机访问令牌并通过 HttpOnly Cookie 下发，
-   API 与 WebSocket 都会校验它，所以没有匿名访问。
-
-   > ⚠️ 改 `0.0.0.0` 等于把 Agent 的文件读写能力暴露到网络上。
-   > 令牌能挡住未授权访问，但请**只在你信任的网络里这么做**，并优先用 SSH 端口转发。
-
-后台常驻可以用 systemd：
-
-```ini
-[Unit]
-Description=CodeForge
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/codeforge -no-open -config /srv/myproject/config -workdir /srv/myproject
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-用 systemd 时**必须**用 `Environment=` 或 `EnvironmentFile=` 把密钥传进去 —— 服务没有 TTY，读不到你在交互式 shell 里 `export` 的东西：
-
-```ini
-[Unit]
-Description=CodeForge
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/codeforge -no-open -config /srv/myproject/config -workdir /srv/myproject
-EnvironmentFile=/etc/codeforge/env
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`/etc/codeforge/env` 里放 `CODEFORGE_API_KEY=sk-...`，并设权限 `chmod 600` + `chown root:root`。放在 `/etc` 而不是项目目录，是为了让它跟着「配置」走而不是跟着「代码」走。
-
-`stop` / `restart` 子命令同样可用。
-
-### Windows x64
-
-双击 `cf.cmd`，或：
-
-```powershell
-.\bin\codeforge.exe -config config
-```
-
-### Linux x86_64 / arm64
-
-```bash
-chmod +x bin/codeforge
-./bin/codeforge -config /path/to/project/config -workdir /path/to/project
-```
-
-静态链接，无动态库依赖。把 `-config` / `-workdir` 给成绝对路径，就不必关心 CWD 在哪。
-
-### Android Termux arm64
-
-手机上没有桌面环境，界面全靠浏览器 —— 这也是把 UI 做成网页的直接好处。
-
-```bash
-pkg install golang
-git clone <repo> && cd codeforge-go
-CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o codeforge ./cmd/agent
-chmod +x codeforge
-./codeforge -no-open -config config
-```
-
-`-no-open` 在 Termux 上是必需的 —— 否则它会尝试拉起系统浏览器，多数情况下会失败。
-
-启动后用手机浏览器打开 <http://127.0.0.1:8420>。若想用外部网络访问同一台服务，按「无 GUI 服务器」那节改 `server.host`。
-
-> ⚠️ **不要把程序放在 `~/storage/shared/` 下运行。**
->
-> 那是 Android 的共享存储（内部存储的 FUSE 挂载点），有两个问题：
->
-> 1. **执行权限被剥掉** —— 共享存储默认 `noexec`，`chmod +x` 不生效，
->    跑起来会得到 `Permission denied`。
-> 2. **性能差一到两个数量级** —— 每次文件读写都穿过 FUSE + sdcardfs，
->    Agent 的工具调用（尤其 `search_files` 遍历）会明显变慢。
->
-> 放在 `~/`（Termux 自己的 ext4 目录）即可：
->
-> ```bash
-> # 正确
-> cd ~ && ./codeforge -no-open -config ~/codeforge-go/config
->
-> # 错误：Permission denied
-> cd ~/storage/shared && ./codeforge
-> ```
->
-> 工作区**可以**指向 `~/storage/shared/...`（那是数据，读写没问题），
-> 只有**程序本身**不能放在那里。
-
-选工作区时 Termux 权限需要注意：
-
-- 默认起始目录是 `~`，一定能列出内容。
-- 需要访问外部存储时先跑 `termux-setup-storage` 申请授权，之后 `~/storage/shared` 软链可用。
-- 若 Android 版本上目录列表为空，多半是存储权限没授 —— 授权后重试。
-- shell 探测会优先找 `$PREFIX/bin/bash`（Android 没有 `/bin/bash`），回退 `/bin/sh`。
-
-### 最小化部署
-
-只需要二进制 + `config/default.yaml` + `config/models.yaml`。`config/local.yaml`、`config/providers.yaml`、`.codeforge/` 都会在首次运行时自动生成。密钥不进文件，走系统环境变量。
-
-**没有构建工具链也能用** —— 二进制是静态的，拷过去直接跑。
-
----
-
-## 配置与密钥
-
-### 分层与写入者
-
-| 文件 | 谁写 | 说明 |
-|---|---|---|
-| `config/default.yaml` | 人工维护 | 随仓库提供 |
-| `config/models.yaml` | 界面「设置」 | 模型库。字段可写 `${VAR}` 引用环境变量 |
-| `config/providers.yaml` | 界面「设置」 | 供应商库。字段可写 `${VAR}` 引用环境变量 |
-| `config/local.yaml` | 人工编辑 | 本地覆盖，**禁止提交** |
-| **系统环境变量** | 人工设置 | **密钥的落点**：`CODEFORGE_API_KEY`，或 YAML 里 `${...}` 引用它 |
-| `.codeforge/` | 程序 | 会话、审计日志、撤销副本、记忆 |
-
-### 密钥在哪
-
-**首选：系统环境变量。** 程序不读密钥文件 —— 文件会躺在项目目录里被同步盘、备份脚本、
-`docker cp` 随手带走，而环境变量不会。
-
-三种写法，效果相同：
-
-```yaml
-# 1) 显式引用（推荐，配置文件里自解释）
-key_value: ${MY_GATEWAY_KEY}
-
-# 2) 只记变量名，请求时才去读（界面上的「环境变量」选项）
-key_source: env
-key_name: MY_GATEWAY_KEY
-
-# 3) 什么都不配，走内置优先级链
-#    CODEFORGE_API_KEY → 厂商专用名 → LLM_API_KEY
-```
-
-**次选：界面「设置」页直接填。** 方便但会写成明文，存在 `config/providers.yaml` 里。
-
-**兜底：`config/local.yaml` 的 `llm.api_key`。** 优先级最高 —— 写了就压过上面两者。
-
-三者可以并存。想收敛到一处，把另两处清空即可。
-
-### 密钥是硬约束
-
-`config/models.yaml`、`config/providers.yaml`、`config/local.yaml` **全部在 `.gitignore` 里**，
-且是按**文件名通配**（`*models.yaml`）而非路径 —— 配置目录改名也挡得住。
-
-`.gitignore` 还会按**文件名**忽略含 `secret` / `credential` / `api_key` / `apikey` 的文件 ——
-代价是正常源码里带这些词的文件也会被静默忽略。写代码时避开这些词（凭据解析那套叫 `config/resolve_llm.go`）。
-
----
-
-## 安全模型
-
-三级策略：**Allow / Ask / Deny**。
-
-- 规则在 `config/default.yaml` 的 `security.rules` 里，有序匹配。
-- **内置危险命令黑名单优先级最高**：`rm -rf /` 之类直接 Deny，规则表改不动。
-- 条件解析失败按**拒绝**处理，不是跳过。
-- 命中 `Ask` 的操作走人工审批，审批渠道在界面上。
-- 每次工具调用都写审计日志（JSONL，超 1 MiB 轮转，保留 3 份）。
-
-`agent.hidden_tools`（控制发给 LLM 的工具表）与 `security.Policy`（控制是否放行）是**刻意分离**的：隐藏不等于禁止。不要合并成一个开关。
-
----
-
-## 子智能体
-
-`delegate_subagents` 把任务派给多个子智能体并行处理。子智能体有独立的策略上限（三处落点同步：Agent / 调度器 / 工具 schema）。
-
-子智能体的操作**全部进审计日志**（历史上曾漏配，导致子智能体操作不留痕）。
-
-## 目标模式
-
-`goal_verify` 在任务完成前做强制校验。不通过就继续做，不会静默放过。审查者的 audit 传真 logger。
-
----
-
-## 打断之后怎么接着跑
-
-任务被打断时保留未完成轮次：
-
-- 界面上的重试圆环：点击从原提问重新开始（保留已产生的上下文）。
-- 编辑重发：改写某条历史提问后重发，服务端截断到那条消息并重跑。
-- 文件回滚：编辑重发时可连带回滚该消息之后的文件改动。
-
-断点状态在检查点面板里可见。
-
----
-
-## 测试
-
-### Go 单元 / 集成测试
-
-```bash
-go test ./...
-```
-
-e2e 默认 Skip，需 `CODEFORGE_E2E=1` 且配置真实 Key。
-
-### 前端渲染器测试（Node，零依赖）
-
-```bash
-node web/test/render_md.test.js
-node web/test/attachments.test.js
-```
-
-改 `ui.js` 后**必须**跑这两个。测试里有对源码文本的断言，改函数名或结构要同步。
-
-### 提交前自检
-
-```bash
-gofmt -l .
-go vet ./...
-go test ./...
-node web/test/render_md.test.js
-node web/test/attachments.test.js
-# 三平台编译
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/ ./cmd/agent
-CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/ ./cmd/agent
-CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o bin/ ./cmd/agent
-```
-
-`go test -race` 需要 C 编译器（`-race` 依赖 cgo）。没装 gcc 时不可用 —— 这也是为什么并发相关的护栏主要是**结构性断言**（解析源码确认形状）而不是竞态检测。
-
-有 Makefile 的话 `make test` / `make test-web` 可以一次跑完。
-
----
-
-## 目录结构
-
-```
-cmd/agent/          入口：flag 解析、进程生命周期、装配
-pkg/agent/          编排：ReAct 循环、历史、压缩、检查点
-pkg/tools/          工具接口、注册、执行器（含策略判定与审批）
-pkg/tools/builtin/  内置工具实现 + 会话守卫（围栏/指纹/撤销栈）
-pkg/tools/plugins/  插件驱动（MCP / 远程能力适配成工具）
-pkg/backend/        执行环境抽象（纯 IO 后端，本机实现）
-pkg/security/       策略判定与审计日志
-pkg/server/         HTTP + WebSocket 服务
-pkg/llm/            LLM 适配器（SSE 流式）
-pkg/store/          SQLite 持久化
-pkg/platform/       平台差异（shell、进程组、路径）
-pkg/errs/           错误分类
-pkg/logx/           结构化日志
-web/dist/           前端（手写单文件，无构建步骤）
-config/             配置（见「配置与密钥」）
-```
-
----
-
-## 技术选型
-
-| 方面 | 选择 | 理由 |
-|---|---|---|
-| 语言 | Go | 单文件静态编译，跨平台，内存可控 |
-| 存储 | SQLite（`modernc.org/sqlite`，纯 Go） | 零外部依赖，`CGO_ENABLED=0` 也能静态编译 |
-| 前端 | 手写单文件 JS | 无构建步骤 = 无 node_modules、无版本漂移 |
-| 依赖 | 极少 | 静态编译与产物体积是产品目标 |
+完整配置、密钥优先级、各平台部署见 **[中文详细版](README_ZH.md)**。
 
 ---
 
 ## 许可
 
-见仓库。
+**GPL-3.0 + 附加限制（禁止商业使用，商业使用须书面授权）。**
+
+非标准 SPDX 许可，详见 [LICENSE](LICENSE) 第 2 条与第 6 条。
