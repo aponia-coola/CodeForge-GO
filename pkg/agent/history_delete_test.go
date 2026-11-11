@@ -15,6 +15,9 @@ func TestHistoryDeleteFiresOnDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 必须关库：Windows 上 TempDir 清理要删 data.db，句柄还开着就删不掉，
+	// 测试会以 "being used by another process" 失败。
+	t.Cleanup(func() { _ = st.Close() })
 	h := NewHistory(st)
 
 	var fired []string
@@ -38,6 +41,9 @@ func TestHistoryDeleteWorkspaceFiresPerSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 必须关库：Windows 上 TempDir 清理要删 data.db，句柄还开着就删不掉，
+	// 测试会以 "being used by another process" 失败。
+	t.Cleanup(func() { _ = st.Close() })
 	h := NewHistory(st)
 
 	a1, _ := h.Create("/proj/A", "a1")
@@ -76,6 +82,9 @@ func TestHistoryDeleteWithoutHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 必须关库：Windows 上 TempDir 清理要删 data.db，句柄还开着就删不掉，
+	// 测试会以 "being used by another process" 失败。
+	t.Cleanup(func() { _ = st.Close() })
 	h := NewHistory(st)
 	sess, err := h.Create("", "无钩子")
 	if err != nil {
